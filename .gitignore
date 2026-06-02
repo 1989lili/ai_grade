@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project-local generated artifacts and secrets
+.claude/
+*.pem
+*.key
+*.crt
+*.dat
+*.db
+*.sqlite
+*.sqlite3
+*.exe
+*.dll
+*.pyd
+backend/*.c
+
+# Keep project PyInstaller specs under version control
+!AI_Grader.spec
+!build.spec
+!build_admin.spec

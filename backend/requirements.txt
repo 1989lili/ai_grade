@@ -1,0 +1,10 @@
+Flask
+flask-cors
+requests
+mss
+pyautogui
+Pillow
+cryptography>=41.0.0
+pystray>=0.19.0
+pyinstaller>=6.0.0
+pywebview>=6.0

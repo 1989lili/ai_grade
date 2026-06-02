@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>好帮手AI阅卷 1.0.0</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title">
+                <div class="logo">好</div>
+                <span>好帮手AI阅卷 1.0.0</span>
+            </div>
+            <div class="window-controls">
+                <button class="window-btn minimize">−</button>
+                <button class="window-btn close">×</button>
+                <button class="window-btn settings">⚙</button>
+                <button class="window-btn menu">☰</button>
+            </div>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab">AI配置</button>
+            <button class="tab active">改卷参数</button>
+            <button class="tab">评分标准</button>
+            <button class="tab">评分过程</button>
+        </div>
+        
+        <div class="content">
+            <!-- AI配置页面 -->
+            <div id="ai-config-tab" class="tab-content">
+                <div class="model-type-section">
+                    <div class="model-type-buttons">
+                        <button class="model-type-btn active">网络模型</button>
+                        <button class="model-type-btn">本机模型</button>
+                    </div>
+                </div>
+                
+                <div class="recognition-model-section">
+                    <div class="recognition-model-control">
+                        <label for="recognition-model">识别模型:</label>
+                        <select id="recognition-model" class="model-select">
+                            <option value="">请选择模型</option>
+                        </select>
+                        <button class="refresh-btn">刷新本机</button>
+                    </div>
+                </div>
+                
+                <!-- 网络评分模型 -->
+                <div class="model-params-section network-model-section">
+                    <div class="model-params-header">
+                        <h3>网络评分模型</h3>
+                        <div class="model-params-buttons">
+                            <button class="params-btn network-params-btn">深度分析</button>
+                            <button class="params-btn network-params-btn">测试对话</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 深度分析内容 -->
+                    <div id="network-depth-analysis-content" class="params-content active">
+                        <div class="service-provider-container">
+                            <div class="service-provider-section">
+                                <div class="service-provider-select">
+                                    <label>选择服务商</label>
+                                    <select class="provider-select">
+                                        <option value="doubao">字节豆包</option>
+                                        <option value="deepseek">深度求索</option>
+                                    </select>
+                                </div>
+                                <div class="api-key-url">
+                                    <label>当前服务商 API Key 申请地址</label>
+                                    <a href="https://console.volcengine.com/" target="_blank" class="api-url-link">https://console.volcengine.com/</a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="doubao-config-section provider-config" data-provider="doubao">
+                            <h4>字节豆包配置</h4>
+                            <div class="config-item">
+                                <label for="api-key-doubao">API Key:</label>
+                                <div class="api-key-input">
+                                    <input type="password" id="api-key-doubao" placeholder="请输入API Key">
+                                    <button class="eye-btn">👁️</button>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label for="model-name-doubao">模型名称:</label>
+                                <select id="model-name-doubao" class="model-select">
+                                    <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="deepseek-config-section provider-config" data-provider="deepseek" style="display: none;">
+                            <h4>深度求索配置</h4>
+                            <div class="config-item">
+                                <label for="api-key-deepseek">API Key:</label>
+                                <div class="api-key-input">
+                                    <input type="password" id="api-key-deepseek" placeholder="请输入API Key">
+                                    <button class="eye-btn">👁️</button>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label for="model-name-deepseek">模型名称:</label>
+                                <select id="model-name-deepseek" class="model-select">
+                                    <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                                    <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                                    <option value="deepseek-chat">deepseek-chat</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="preset-buttons">
+                            <button class="save-preset-btn">保存预设</button>
+                            <button class="preset-list-btn">预设列表</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 测试对话内容 -->
+                    <div id="network-test-dialog-content" class="params-content">
+                        <div class="analysis-container">
+                            <div class="chat-container">
+                                <!-- 聊天内容将显示在这里 -->
+                            </div>
+                        </div>
+                        <div class="analysis-container">
+                            <div class="analysis-input">
+                                <input type="text" placeholder="请输入测试内容">
+                                <button class="send-test-btn network-send-test-btn">发送测试</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 本机评分模型 -->
+                <div class="model-params-section local-model-section" style="display: none;">
+                    <div class="model-params-header">
+                        <h3>本机评分模型</h3>
+                        <div class="model-params-buttons">
+                            <button class="params-btn local-params-btn">深度分析</button>
+                            <button class="params-btn local-params-btn">测试对话</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 深度分析内容 -->
+                    <div id="local-depth-analysis-content" class="params-content active">
+                        <div class="local-model-config">
+                            <h4>本机模型配置</h4>
+                            <div class="config-item">
+                                <label for="local-model-name">模型名称:</label>
+                                <select id="local-model-name" class="model-select">
+                                    <option value="local1">本机识别模型1</option>
+                                    <option value="local2">本机识别模型2</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 测试对话内容 -->
+                    <div id="local-test-dialog-content" class="params-content">
+                        <div class="analysis-container">
+                            <div class="chat-container">
+                                <!-- 聊天内容将显示在这里 -->
+                            </div>
+                        </div>
+                        <div class="analysis-container">
+                            <div class="analysis-input">
+                                <input type="text" placeholder="请输入测试内容">
+                                <button class="send-test-btn local-send-test-btn">发送测试</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 改卷参数页面 -->
+            <div id="marking-params-tab" class="tab-content active">
+                <div class="section">
+                    <div class="section-title">数值设置</div>
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-label">改卷数量</div>
+                            <div class="setting-input">
+                                <input type="text" value="10">
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn">▲</button>
+                                    <button class="arrow-btn">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">已改数量</div>
+                            <div class="setting-input">
+                                <input type="text" value="0">
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn">▲</button>
+                                    <button class="arrow-btn">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-label">取卡延时</div>
+                            <div class="setting-input">
+                                <input type="text" value="1.2">
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn">▲</button>
+                                    <button class="arrow-btn">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">打分延时</div>
+                            <div class="setting-input">
+                                <input type="text" value="0.9">
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn">▲</button>
+                                    <button class="arrow-btn">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <div class="section-title">属性设置</div>
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-label">年级:</div>
+                            <div class="setting-input">
+                                <input type="text" style="width: 160px;">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">题目满分</div>
+                            <div class="setting-input">
+                                <input type="text" value="1">
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn">▲</button>
+                                    <button class="arrow-btn">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-label">题型:</div>
+                            <div class="setting-input">
+                                <input type="text" style="width: 160px;">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">打分个数</div>
+                            <div class="setting-input">
+                                <input type="text" value="1" readonly disabled>
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn" disabled>▲</button>
+                                    <button class="arrow-btn" disabled>▼</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-label">学科:</div>
+                            <div class="setting-input">
+                                <input type="text" style="width: 160px;">
+                            </div>
+                        </div>
+                        <div class="setting-item">
+                            <div class="setting-label">打分步长</div>
+                            <div class="setting-input">
+                                <input type="text" value="1">
+                                <div class="arrow-buttons">
+                                    <button class="arrow-btn">▲</button>
+                                    <button class="arrow-btn">▼</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="section">
+                    <div class="marking-section">
+                        <div class="section-title">标记设置</div>
+                        <div class="marking-control">
+                            <button class="marking-btn one-click-add">一键添加</button>
+                        </div>
+                        <div class="marking-items">
+                            <div class="marking-item">
+                                <div class="marking-label">答题卡区域</div>
+                                <button class="marking-btn add-mark card-area">添加标记</button>
+                            </div>
+                            <div class="marking-item">
+                                <div class="marking-label">打分框位置</div>
+                                <button class="marking-btn add-mark score-area">添加标记</button>
+                            </div>
+                            <div class="marking-item">
+                                <div class="marking-label">提交按钮位置</div>
+                                <button class="marking-btn add-mark submit-area">添加标记</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 评分标准页面 -->
+            <div id="scoring-standard-tab" class="tab-content">
+                <div class="editor-container">
+                    <div class="editor-toolbar">
+                        <button class="toolbar-btn clear-btn" title="清空本子页全部文本">
+                            <span class="btn-icon">🗑️</span>
+                        </button>
+                        <button class="toolbar-btn copy-btn" title="复制本子页全部文本">
+                            <span class="btn-icon">📋</span>
+                        </button>
+                        <div class="page-controls">
+                            <button class="toolbar-btn prev-page" title="上一页预设">
+                                <span class="btn-icon">◀</span>
+                            </button>
+                            <span class="page-number">1</span>
+                            <button class="toolbar-btn next-page" title="下一页预设">
+                                <span class="btn-icon">▶</span>
+                            </button>
+                        </div>
+                        <div class="font-controls">
+                            <button class="toolbar-btn decrease-font" title="缩小字号">
+                                <span class="btn-icon">−</span>
+                            </button>
+                            <button class="toolbar-btn increase-font" title="放大字号">
+                                <span class="btn-icon">+</span>
+                            </button>
+                        </div>
+                        <div class="format-controls">
+                            <button class="toolbar-btn format-btn text-format active" title="显示纯文本">
+                                文本格式
+                            </button>
+                            <button class="toolbar-btn format-btn formula-format" title="可渲染显示公式">
+                                融合格式
+                            </button>
+                        </div>
+                    </div>
+                    <div id="scoring-editor" class="editor-content" contenteditable="true">
+                        <!-- 编辑区域 -->
+                    </div>
+                    <div class="editor-bottom">
+                        <div class="content-tabs">
+                            <button class="content-tab active" data-tab="material">题目材料</button>
+                            <button class="content-tab" data-tab="answer">参考答案</button>
+                            <button class="content-tab" data-tab="example">评价示例</button>
+                            <button class="content-tab" data-tab="requirement">评分要求</button>
+                        </div>
+                        <div class="image-btn-container">
+                            <button class="add-image-btn">📷 添加图片</button>
+                            <input type="file" id="image-upload" accept="image/*" style="display: none;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 评分过程页面 -->
+            <div id="scoring-process-tab" class="tab-content">
+                <div class="process-panel">
+                    <div class="process-header">
+                        <div class="process-title">评分过程</div>
+                        <div id="grading-elapsed" class="process-elapsed">未开始</div>
+                    </div>
+                    <div id="grading-step-list" class="process-step-list">
+                        <div class="process-empty">点击“批改”后显示评分过程</div>
+                    </div>
+                    <div id="grading-result" class="process-result"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="footer-top">
+                <button class="action-btn correct">批改</button>
+                <button class="action-btn debug">调试</button>
+                <div class="debug-info">
+                    <input type="text" value="提示信息" readonly>
+                </div>
+                <button class="action-btn record">记录</button>
+            </div>
+            <div class="footer-bottom">
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+                <div class="progress-text">0 / 10</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- HTML 标记框 (body 直接子元素，避免被 container flex/overflow 裁剪) -->
+    <div id="marker-card" class="html-marker" data-mtype="card">
+        <button class="html-marker-close">×</button>
+    </div>
+    <div id="marker-score" class="html-marker" data-mtype="score">
+        <button class="html-marker-close">×</button>
+    </div>
+    <div id="marker-submit" class="html-marker" data-mtype="submit">
+        <button class="html-marker-close">×</button>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>简单打分页面</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background: #f4f7fb;
+            color: #222;
+        }
+
+        .page {
+            min-height: 100vh;
+            padding: 32px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .card {
+            width: 900px;
+            min-height: 560px;
+            padding: 24px;
+            display: flex;
+            gap: 24px;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 12px 32px rgba(20, 42, 80, 0.12);
+        }
+
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .image-area {
+            flex: 1;
+            min-height: 420px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px dashed #9bb7e5;
+            border-radius: 12px;
+            background: #eef5ff;
+            overflow: hidden;
+        }
+
+        .image-area img {
+            max-width: 100%;
+            max-height: 100%;
+            display: none;
+        }
+
+        .image-placeholder {
+            color: #5d77a6;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .nav-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+        }
+
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 22px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #2f80ed;
+            color: #fff;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: #1f6fd3;
+        }
+
+        button:disabled {
+            background: #b0c4de;
+            cursor: not-allowed;
+            color: #e8eef5;
+        }
+
+        button:disabled:hover {
+            background: #b0c4de;
+        }
+
+        .right-panel {
+            width: 240px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border-left: 1px solid #e5eaf3;
+        }
+
+        .score-box {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .score-box label {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .score-box input {
+            width: 100%;
+            height: 48px;
+            padding: 0 12px;
+            border: 1px solid #c8d3e6;
+            border-radius: 8px;
+            font-size: 20px;
+            outline: none;
+        }
+
+        .score-box input:focus {
+            border-color: #2f80ed;
+            box-shadow: 0 0 0 3px rgba(47, 128, 237, 0.14);
+        }
+
+        .submit-btn {
+            width: 100%;
+            height: 48px;
+            background: #22a06b;
+        }
+
+        .submit-btn:hover {
+            background: #18875a;
+        }
+
+        .tip {
+            margin-top: 14px;
+            color: #7b8798;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="card">
+            <div class="left-panel">
+                <div class="image-area">
+                    <img id="paperImage" alt="答题卡图片">
+                    <div id="placeholder" class="image-placeholder">图片区域</div>
+                </div>
+
+                <div class="nav-buttons">
+                    <button id="prevBtn">上一张</button>
+                    <button id="nextBtn">下一张</button>
+                </div>
+            </div>
+
+            <div class="right-panel">
+                <div class="score-box">
+                    <label for="scoreInput">打分框</label>
+                    <input id="scoreInput" type="number" min="0" step="0.5" placeholder="请输入分数">
+                </div>
+
+                <button id="submitBtn" class="submit-btn">提交</button>
+
+                <div class="tip">
+                    可将图片路径填入脚本中的 images 数组，用于模拟上一张/下一张切换。
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const images = [
+            '小文.png',
+            '小浩.png',
+            '小熊.png'
+        ];
+
+        let currentIndex = 0;
+        const paperImage = document.getElementById('paperImage');
+        const placeholder = document.getElementById('placeholder');
+        const scoreInput = document.getElementById('scoreInput');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+
+        function renderImage() {
+            if (images.length === 0) {
+                paperImage.style.display = 'none';
+                placeholder.style.display = 'block';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                return;
+            }
+
+            paperImage.src = images[currentIndex];
+            paperImage.style.display = 'block';
+            placeholder.style.display = 'none';
+            prevBtn.disabled = currentIndex === 0;
+            nextBtn.disabled = currentIndex === images.length - 1;
+        }
+
+        prevBtn.addEventListener('click', () => {
+            if (currentIndex === 0) return;
+            currentIndex--;
+            scoreInput.value = '';
+            renderImage();
+        });
+
+        nextBtn.addEventListener('click', () => {
+            if (currentIndex === images.length - 1) return;
+            currentIndex++;
+            scoreInput.value = '';
+            renderImage();
+        });
+
+        document.getElementById('submitBtn').addEventListener('click', () => {
+            alert(`提交成功，分数：${scoreInput.value || '未填写'}`);
+        });
+
+        renderImage();
+    </script>
+</body>
+</html>
