@@ -25,13 +25,26 @@ tA3jDrt1QHfHuynznyIoP2AlU/ZIP+RJ0oOpWr1WjR+C+fB4uPEiWpRiPVJ/cfL9
 -----END PUBLIC KEY-----"""
 
 LICENSE_FILENAME = 'license.dat'
+APP_DIR_NAME = 'AI_Grader'
+
+
+def _get_app_data_dir():
+    base = os.environ.get('APPDATA')
+    if not base:
+        base = os.path.expanduser('~')
+    path = os.path.join(base, APP_DIR_NAME)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def _get_license_path():
+    return os.path.join(_get_app_data_dir(), LICENSE_FILENAME)
+
+
+def _get_legacy_license_path():
     if getattr(sys, 'frozen', False):
         return os.path.join(os.path.dirname(sys.executable), LICENSE_FILENAME)
-    else:
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), LICENSE_FILENAME)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), LICENSE_FILENAME)
 
 
 def validate_license_key(license_key_str):
@@ -89,17 +102,33 @@ def store_license(license_key_str):
         f.write(encrypted)
 
 
-def load_license():
+def _read_encrypted_license(path):
     try:
         from .crypto import decrypt_data
     except ImportError:
         from crypto import decrypt_data  # type: ignore
-    license_path = _get_license_path()
-    if not os.path.exists(license_path):
-        return None
-    with open(license_path, 'rb') as f:
+    with open(path, 'rb') as f:
         encrypted = f.read()
-    return decrypt_data(encrypted).decode()
+    return decrypt_data(encrypted).decode(), encrypted
+
+
+def load_license():
+    license_path = _get_license_path()
+    if os.path.exists(license_path):
+        license_key, _ = _read_encrypted_license(license_path)
+        return license_key
+
+    legacy_path = _get_legacy_license_path()
+    if not os.path.exists(legacy_path):
+        return None
+
+    license_key, encrypted = _read_encrypted_license(legacy_path)
+    try:
+        with open(license_path, 'wb') as f:
+            f.write(encrypted)
+    except Exception:
+        pass
+    return license_key
 
 
 def is_activated():
