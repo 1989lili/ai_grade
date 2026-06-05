@@ -29,6 +29,8 @@ MARKER_COLORS_HEX = {
     'submit': '#9c27b0',
 }
 
+MARKER_TRANSPARENT_COLOR = '#010203'
+
 MARKER_LABELS = {
     'card':   '答题卡区域',
     'score':  '打分框位置',
@@ -47,9 +49,10 @@ _marker_queue = queue.Queue()  # 主线程 → tkinter 线程
 
 
 class TkMarker:
-    """tkinter Toplevel 标记窗口。支持拖拽移动 + 边缘拖拽缩放。"""
+    """由四条独立细窗口组成的空心虚线标记框。框内没有窗口区域，不遮挡内容。"""
 
-    _RESIZE_MARGIN = 8
+    _BORDER = 6
+    _RESIZE_MARGIN = 24
     _MIN_W = 100
     _MIN_H = 50
 
@@ -62,149 +65,147 @@ class TkMarker:
         'nw': 'top_left_corner',
         'se': 'bottom_right_corner',
         'sw': 'bottom_left_corner',
+        'move': 'fleur',
     }
 
     def __init__(self, root, mtype):
         import tkinter as tk
         self._mtype = mtype
         self._color = MARKER_COLORS_HEX[mtype]
-        self._win = tk.Toplevel(root)
-        self._win.overrideredirect(True)
-        self._win.attributes('-alpha', 1.0)
-        self._win.attributes('-topmost', True)
-        self._win.attributes('-toolwindow', True)
-        self._win.configure(bg=self._color)
-        self._win.attributes('-transparentcolor', self._color)
-        self._canvas = tk.Canvas(
-            self._win,
-            bg=self._color,
-            highlightthickness=0,
-            bd=0,
-            cursor='arrow'
-        )
-        self._canvas.pack(fill='both', expand=True)
-        self._border_id = self._canvas.create_rectangle(
-            2, 2, MARKER_SIZES[mtype][0] - 3, MARKER_SIZES[mtype][1] - 3,
-            outline=self._color,
-            width=4
-        )
-        self._win.withdraw()
-
-        # 交互状态
-        self._drag_offset_x = 0
-        self._drag_offset_y = 0
-        self._resize_dir = None  # 非 None 表示正在缩放
-        self._resize_start = None  # (root_x, root_y, win_x, win_y, w, h)
-
-        # 绑定事件
-        for target in (self._win, self._canvas):
-            target.bind('<Button-1>', self._on_press)
-            target.bind('<B1-Motion>', self._on_move)
-            target.bind('<ButtonRelease-1>', self._on_release)
-            target.bind('<Motion>', self._on_motion)
-            target.bind('<Leave>', self._on_leave)
-
+        self._root = root
         self._visible = False
         self._rect = {'x': 0, 'y': 0, 'w': MARKER_SIZES[mtype][0], 'h': MARKER_SIZES[mtype][1]}
+        self._drag_start = None  # (mode, root_x, root_y, x, y, w, h)
+        self._wins = {}
+        self._canvases = {}
+        self._line_ids = {}
 
-    # ---- 边缘检测 ----
+        for part in ('top', 'bottom', 'left', 'right'):
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.attributes('-topmost', True)
+            win.attributes('-toolwindow', True)
+            win.configure(bg=MARKER_TRANSPARENT_COLOR)
+            canvas = tk.Canvas(
+                win,
+                bg=MARKER_TRANSPARENT_COLOR,
+                highlightthickness=0,
+                bd=0,
+                cursor='fleur'
+            )
+            canvas.pack(fill='both', expand=True)
+            line_id = canvas.create_line(0, 0, 1, 1, fill=self._color, width=3, dash=(10, 6))
+            win.withdraw()
 
-    def _get_resize_dir(self, event):
-        """根据鼠标在窗口内的位置返回缩放方向，不在边缘则返回 None。"""
-        x, y = event.x, event.y
-        w = self._win.winfo_width()
-        h = self._win.winfo_height()
+            self._wins[part] = win
+            self._canvases[part] = canvas
+            self._line_ids[part] = line_id
+
+            for target in (win, canvas):
+                target.bind('<Button-1>', lambda e, p=part: self._on_press(e, p))
+                target.bind('<B1-Motion>', self._on_move)
+                target.bind('<ButtonRelease-1>', self._on_release)
+                target.bind('<Motion>', lambda e, p=part: self._on_motion(e, p))
+                target.bind('<Leave>', self._on_leave)
+
+    def _mode_for_part(self, event, part):
+        x, y, w, h = self._rect['x'], self._rect['y'], self._rect['w'], self._rect['h']
         m = self._RESIZE_MARGIN
+        rx = event.x_root - x
+        ry = event.y_root - y
 
-        left = x < m
-        right = x > w - m
-        top = y < m
-        bottom = y > h - m
+        if part == 'top':
+            if rx <= m:
+                return 'nw'
+            if rx >= w - m:
+                return 'ne'
+            return 'move'
+        if part == 'bottom':
+            if rx <= m:
+                return 'sw'
+            if rx >= w - m:
+                return 'se'
+            return 'move'
+        if part == 'left':
+            if ry <= m:
+                return 'nw'
+            if ry >= h - m:
+                return 'sw'
+            return 'move'
+        if part == 'right':
+            if ry <= m:
+                return 'ne'
+            if ry >= h - m:
+                return 'se'
+            return 'move'
+        return 'move'
 
-        if top and left:     return 'nw'
-        if top and right:    return 'ne'
-        if bottom and left:  return 'sw'
-        if bottom and right: return 'se'
-        if left:             return 'w'
-        if right:            return 'e'
-        if top:              return 'n'
-        if bottom:           return 's'
-        return None
-
-    # ---- 事件处理 ----
-
-    def _on_motion(self, event):
-        d = self._get_resize_dir(event)
-        cursor = self._RESIZE_CURSORS.get(d, 'arrow')
-        self._win.configure(cursor=cursor)
-        self._canvas.configure(cursor=cursor)
+    def _on_motion(self, event, part):
+        cursor = self._RESIZE_CURSORS.get(self._mode_for_part(event, part), 'fleur')
+        for win in self._wins.values():
+            win.configure(cursor=cursor)
+        for canvas in self._canvases.values():
+            canvas.configure(cursor=cursor)
 
     def _on_leave(self, event):
-        self._win.configure(cursor='arrow')
-        self._canvas.configure(cursor='arrow')
+        for win in self._wins.values():
+            win.configure(cursor='fleur')
+        for canvas in self._canvases.values():
+            canvas.configure(cursor='fleur')
 
-    def _on_press(self, event):
-        d = self._get_resize_dir(event)
-        if d:
-            self._resize_dir = d
-            self._resize_start = (
-                event.x_root, event.y_root,
-                self._win.winfo_x(), self._win.winfo_y(),
-                self._win.winfo_width(), self._win.winfo_height(),
-            )
-        else:
-            self._resize_dir = None
-            self._drag_offset_x = event.x_root - self._win.winfo_x()
-            self._drag_offset_y = event.y_root - self._win.winfo_y()
+    def _on_press(self, event, part):
+        self._drag_start = (
+            self._mode_for_part(event, part),
+            event.x_root,
+            event.y_root,
+            self._rect['x'],
+            self._rect['y'],
+            self._rect['w'],
+            self._rect['h'],
+        )
 
     def _on_move(self, event):
-        if self._resize_dir:
-            self._do_resize(event)
-        else:
-            x = event.x_root - self._drag_offset_x
-            y = event.y_root - self._drag_offset_y
-            self._win.geometry(f'+{x}+{y}')
-
-    def _on_release(self, event):
-        self._resize_dir = None
-        self._resize_start = None
-        self._update_rect()
-
-    def _do_resize(self, event):
-        sx, sy, wx, wy, sw, sh = self._resize_start
+        if not self._drag_start:
+            return
+        mode, sx, sy, x, y, w, h = self._drag_start
         dx = event.x_root - sx
         dy = event.y_root - sy
-        d = self._resize_dir
 
-        new_x, new_y = wx, wy
-        new_w, new_h = sw, sh
+        new_x, new_y, new_w, new_h = x, y, w, h
+        if mode == 'move':
+            new_x = x + dx
+            new_y = y + dy
+        else:
+            if 'e' in mode:
+                new_w = max(self._MIN_W, w + dx)
+            if 'w' in mode:
+                new_w = max(self._MIN_W, w - dx)
+                new_x = x + w - new_w
+            if 's' in mode:
+                new_h = max(self._MIN_H, h + dy)
+            if 'n' in mode:
+                new_h = max(self._MIN_H, h - dy)
+                new_y = y + h - new_h
 
-        if 'e' in d:
-            new_w = max(self._MIN_W, sw + dx)
-        if 'w' in d:
-            new_w = max(self._MIN_W, sw - dx)
-            new_x = wx + sw - new_w
-        if 's' in d:
-            new_h = max(self._MIN_H, sh + dy)
-        if 'n' in d:
-            new_h = max(self._MIN_H, sh - dy)
-            new_y = wy + sh - new_h
+        self._rect = {'x': int(new_x), 'y': int(new_y), 'w': int(new_w), 'h': int(new_h)}
+        self._layout()
 
-        self._win.geometry(f'{new_w}x{new_h}+{new_x}+{new_y}')
+    def _on_release(self, event):
+        self._drag_start = None
 
-    def _redraw_border(self):
-        w = max(1, self._win.winfo_width())
-        h = max(1, self._win.winfo_height())
-        self._canvas.coords(self._border_id, 2, 2, w - 3, h - 3)
+    def _layout(self):
+        x, y, w, h = self._rect['x'], self._rect['y'], self._rect['w'], self._rect['h']
+        b = self._BORDER
 
-    def _update_rect(self):
-        self._redraw_border()
-        self._rect = {
-            'x': self._win.winfo_x(),
-            'y': self._win.winfo_y(),
-            'w': self._win.winfo_width(),
-            'h': self._win.winfo_height(),
-        }
+        self._wins['top'].geometry(f'{w}x{b}+{x}+{y}')
+        self._wins['bottom'].geometry(f'{w}x{b}+{x}+{y + h - b}')
+        self._wins['left'].geometry(f'{b}x{h}+{x}+{y}')
+        self._wins['right'].geometry(f'{b}x{h}+{x + w - b}+{y}')
+
+        self._canvases['top'].coords(self._line_ids['top'], 0, b // 2, w, b // 2)
+        self._canvases['bottom'].coords(self._line_ids['bottom'], 0, b // 2, w, b // 2)
+        self._canvases['left'].coords(self._line_ids['left'], b // 2, 0, b // 2, h)
+        self._canvases['right'].coords(self._line_ids['right'], b // 2, 0, b // 2, h)
 
     # ---- 公共接口（通过 queue 在 tkinter 线程中调用） ----
 
@@ -215,21 +216,24 @@ class TkMarker:
         return self._visible
 
     def _show(self, x, y, w, h):
-        self._win.geometry(f'{w}x{h}+{x}+{y}')
-        self._win.deiconify()
-        self._win.lift()
-        self._win.update_idletasks()
-        self._redraw_border()
+        self._rect = {'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)}
+        self._layout()
+        for win in self._wins.values():
+            win.deiconify()
+            win.lift()
         self._visible = True
-        self._rect = {'x': x, 'y': y, 'w': w, 'h': h}
 
     def _hide(self):
-        self._win.withdraw()
+        for win in self._wins.values():
+            win.withdraw()
         self._visible = False
 
     def _destroy(self):
-        self._win.destroy()
-
+        for win in list(self._wins.values()):
+            win.destroy()
+        self._wins.clear()
+        self._canvases.clear()
+        self._line_ids.clear()
 
 def _tk_marker_main(markers_out, ready_event):
     """在独立线程中：创建 tk root → 创建标记窗口 → 进入 mainloop"""
