@@ -1049,6 +1049,27 @@
             background-color: #eef7ff;
         }
 
+        .process-step[data-step-key="scan_card"].running {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .process-step[data-step-key="scan_card"].running::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: -35%;
+            height: 36%;
+            background: linear-gradient(180deg, transparent, rgba(33, 150, 243, 0.28), transparent);
+            animation: scan-sweep 1.4s linear infinite;
+        }
+
+        @keyframes scan-sweep {
+            from { transform: translateY(0); }
+            to { transform: translateY(380%); }
+        }
+
         .process-step.success {
             border-left-color: #4caf50;
             background-color: #f2fbf2;
@@ -1239,20 +1260,20 @@
         .html-marker[data-mtype="card"] {
             width: 400px;
             height: 300px;
-            background: rgba(233, 30, 99, 0.06);
-            border: 3px dashed #e91e63;
+            background: transparent;
+            border: 3px solid #e91e63;
         }
         .html-marker[data-mtype="score"] {
             width: 300px;
             height: 175px;
-            background: rgba(33, 150, 243, 0.06);
-            border: 3px dashed #2196f3;
+            background: transparent;
+            border: 3px solid #2196f3;
         }
         .html-marker[data-mtype="submit"] {
             width: 300px;
             height: 175px;
-            background: rgba(156, 39, 176, 0.06);
-            border: 3px dashed #9c27b0;
+            background: transparent;
+            border: 3px solid #9c27b0;
         }
         .html-marker-label {
             position: absolute;

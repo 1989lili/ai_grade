@@ -759,12 +759,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let gradingTimer = null;
     let gradingStartedAt = null;
+    let scanTimer = null;
+    let scanFrame = 0;
     let currentProcessSteps = [];
 
+    const SCAN_MESSAGES = [
+        '正在定位答题卡边界...',
+        '正在逐行扫描学生作答...',
+        '正在增强文字区域...',
+        '正在整理识别内容并发送给大模型...'
+    ];
+
     const INITIAL_GRADING_STEPS = [
-        { key: 'capture', label: '截取答题卡', status: 'pending', message: '等待开始' },
-        { key: 'model_call', label: '调用AI模型', status: 'pending', message: '等待开始' },
-        { key: 'parse_score', label: '解析分数', status: 'pending', message: '等待模型返回' },
+        { key: 'scan_card', label: '扫描答题卡', status: 'pending', message: '等待开始' },
+        { key: 'student_answer', label: '学生作答', status: 'pending', message: '等待识别' },
+        { key: 'review_analysis', label: '阅卷评析', status: 'pending', message: '等待分析' },
+        { key: 'score_result', label: '成绩得分', status: 'pending', message: '等待评分' },
         { key: 'fill_score', label: '填写分数', status: 'pending', message: '等待分数解析' },
         { key: 'submit', label: '提交结果', status: 'pending', message: '等待填写完成' }
     ];
@@ -810,6 +820,27 @@ document.addEventListener('DOMContentLoaded', function() {
         return '等待';
     }
 
+    function startScanAnimation() {
+        stopScanAnimation();
+        scanFrame = 0;
+        updateProcessStep('scan_card', 'running', SCAN_MESSAGES[0]);
+        scanTimer = setInterval(function() {
+            scanFrame++;
+            var message = SCAN_MESSAGES[scanFrame % SCAN_MESSAGES.length];
+            updateProcessStep('scan_card', 'running', message);
+        }, 700);
+    }
+
+    function stopScanAnimation(finalMessage, status) {
+        if (scanTimer) {
+            clearInterval(scanTimer);
+            scanTimer = null;
+        }
+        if (finalMessage) {
+            updateProcessStep('scan_card', status || 'success', finalMessage);
+        }
+    }
+
     function renderProcessSteps(steps) {
         var list = document.getElementById('grading-step-list');
         if (!list) return;
@@ -825,6 +856,7 @@ document.addEventListener('DOMContentLoaded', function() {
         currentProcessSteps.forEach(function(step) {
             var item = document.createElement('div');
             item.className = 'process-step ' + (step.status || 'pending');
+            item.dataset.stepKey = step.key || '';
 
             var top = document.createElement('div');
             top.className = 'process-step-top';
@@ -874,6 +906,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function resetGradingProcess() {
         stopElapsedTimer();
+        stopScanAnimation();
         setElapsedText('未开始');
         var resultBox = document.getElementById('grading-result');
         if (resultBox) {
@@ -948,20 +981,18 @@ document.addEventListener('DOMContentLoaded', function() {
             await new Promise(resolve => setTimeout(resolve, 150));
         }
 
-        debugInput.value = '正在截图答题卡...';
+        debugInput.value = '正在扫描答题卡...';
         debugInput.classList.remove('task-completed');
         progressFill.classList.remove('task-completed');
-        progressFill.style.width = '25%';
-        progressText.textContent = '截屏中...';
-        updateProcessStep('capture', 'running', '准备截取答题卡区域...');
+        progressFill.style.width = '20%';
+        progressText.textContent = '扫描中...';
         startElapsedTimer();
+        startScanAnimation();
 
         try {
             debugInput.value = '正在调用AI模型批改...';
             progressFill.style.width = '50%';
             progressText.textContent = '模型调用中...';
-            updateProcessStep('capture', 'success', '已提交截图批改请求');
-            updateProcessStep('model_call', 'running', '正在调用AI模型，可能需要1-3分钟，请勿关闭窗口...');
 
             var response = await fetch('/api/grade', {
                 method: 'POST',
@@ -986,6 +1017,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             stopElapsedTimer();
             restoreMarkers();
+            if (result.status === 'success') {
+                stopScanAnimation('答题卡扫描完成，模型已返回结构化评分结果', 'success');
+            } else {
+                stopScanAnimation(result.message || '扫描或评分失败', 'error');
+            }
             if (result.steps && result.steps.length) {
                 renderProcessSteps(result.steps);
             }
@@ -1008,7 +1044,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             stopElapsedTimer();
             restoreMarkers();
-            updateProcessStep('model_call', 'error', '批改请求失败：' + error.message);
+            stopScanAnimation('扫描或批改请求失败：' + error.message, 'error');
+            updateProcessStep('review_analysis', 'error', '批改请求失败：' + error.message);
             showGradingResult({ status: 'error', message: '批改请求失败：' + error.message });
             debugInput.value = '批改请求失败: ' + error.message;
             progressFill.style.width = '0%';

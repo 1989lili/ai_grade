@@ -21,7 +21,6 @@ a = Analysis(
         (os.path.join(conda_bin, 'sqlite3.dll'), '.'),
         (os.path.join(conda_bin, 'liblzma.dll'), '.'),
         (os.path.join(conda_bin, 'libbz2.dll'), '.'),
-        (os.path.join(conda_bin, 'libmpdec-4.dll'), '.'),
         (os.path.join(conda_bin, 'libexpat.dll'), '.'),
         (os.path.join(conda_bin, 'tcl86t.dll'), '.'),
         (os.path.join(conda_bin, 'tk86t.dll'), '.'),

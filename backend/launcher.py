@@ -70,10 +70,24 @@ class TkMarker:
         self._color = MARKER_COLORS_HEX[mtype]
         self._win = tk.Toplevel(root)
         self._win.overrideredirect(True)
-        self._win.attributes('-alpha', 0.12)
+        self._win.attributes('-alpha', 1.0)
         self._win.attributes('-topmost', True)
         self._win.attributes('-toolwindow', True)
         self._win.configure(bg=self._color)
+        self._win.attributes('-transparentcolor', self._color)
+        self._canvas = tk.Canvas(
+            self._win,
+            bg=self._color,
+            highlightthickness=0,
+            bd=0,
+            cursor='arrow'
+        )
+        self._canvas.pack(fill='both', expand=True)
+        self._border_id = self._canvas.create_rectangle(
+            2, 2, MARKER_SIZES[mtype][0] - 3, MARKER_SIZES[mtype][1] - 3,
+            outline=self._color,
+            width=4
+        )
         self._win.withdraw()
 
         # 交互状态
@@ -83,12 +97,12 @@ class TkMarker:
         self._resize_start = None  # (root_x, root_y, win_x, win_y, w, h)
 
         # 绑定事件
-        self._win.bind('<Button-1>', self._on_press)
-        self._win.bind('<B1-Motion>', self._on_move)
-        self._win.bind('<ButtonRelease-1>', self._on_release)
-
-        self._win.bind('<Motion>', self._on_motion)
-        self._win.bind('<Leave>', self._on_leave)
+        for target in (self._win, self._canvas):
+            target.bind('<Button-1>', self._on_press)
+            target.bind('<B1-Motion>', self._on_move)
+            target.bind('<ButtonRelease-1>', self._on_release)
+            target.bind('<Motion>', self._on_motion)
+            target.bind('<Leave>', self._on_leave)
 
         self._visible = False
         self._rect = {'x': 0, 'y': 0, 'w': MARKER_SIZES[mtype][0], 'h': MARKER_SIZES[mtype][1]}
@@ -123,9 +137,11 @@ class TkMarker:
         d = self._get_resize_dir(event)
         cursor = self._RESIZE_CURSORS.get(d, 'arrow')
         self._win.configure(cursor=cursor)
+        self._canvas.configure(cursor=cursor)
 
     def _on_leave(self, event):
         self._win.configure(cursor='arrow')
+        self._canvas.configure(cursor='arrow')
 
     def _on_press(self, event):
         d = self._get_resize_dir(event)
@@ -176,7 +192,13 @@ class TkMarker:
 
         self._win.geometry(f'{new_w}x{new_h}+{new_x}+{new_y}')
 
+    def _redraw_border(self):
+        w = max(1, self._win.winfo_width())
+        h = max(1, self._win.winfo_height())
+        self._canvas.coords(self._border_id, 2, 2, w - 3, h - 3)
+
     def _update_rect(self):
+        self._redraw_border()
         self._rect = {
             'x': self._win.winfo_x(),
             'y': self._win.winfo_y(),
@@ -196,6 +218,8 @@ class TkMarker:
         self._win.geometry(f'{w}x{h}+{x}+{y}')
         self._win.deiconify()
         self._win.lift()
+        self._win.update_idletasks()
+        self._redraw_border()
         self._visible = True
         self._rect = {'x': x, 'y': y, 'w': w, 'h': h}
 

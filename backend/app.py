@@ -13,12 +13,12 @@ import time
 
 try:
     from .crypto import secure_read_json, secure_write_json
-    from .license import is_activated
+    from .license import is_activated, validate_license_key, store_license
     from .activation_ui import ACTIVATION_HTML
     from .hwid import generate_hwid
 except ImportError:
     from crypto import secure_read_json, secure_write_json  # type: ignore
-    from license import is_activated  # type: ignore
+    from license import is_activated, validate_license_key, store_license  # type: ignore
     from activation_ui import ACTIVATION_HTML  # type: ignore
     from hwid import generate_hwid  # type: ignore
 
@@ -31,8 +31,7 @@ ACTIVATED = False
 
 def check_activation():
     global ACTIVATED
-    if not ACTIVATED:
-        ACTIVATED = is_activated()
+    ACTIVATED = is_activated()
     return ACTIVATED
 
 # ---------- 路径解析 ----------
@@ -129,10 +128,11 @@ GRADING_SYSTEM_PROMPT = """你是一位专业、严格、稳定的阅卷老师�
 4. 如果学生答案部分正确，应按评分要求给出合理的部分分。
 5. 如果无法识别学生作答，score 必须为 0，并在 reasoning 中说明无法识别。
 6. score 只能是数字；如果评分要求中能判断满分，max_score 填该满分，否则填 0。
-7. 只能返回一个 JSON 对象，不要返回 Markdown、代码块或额外解释。
+7. 需要按“学生作答、阅卷评析、成绩得分”三个步骤组织结果。
+8. 只能返回一个 JSON 对象，不要返回 Markdown、代码块或额外解释。
 
 返回格式：
-{"score": <得分数字>, "max_score": <满分数字>, "reasoning": "<简短说明扣分/给分依据>"}"""
+{"student_answer": "<识别出的学生作答>", "review_analysis": "<阅卷评析>", "score": <得分数字>, "max_score": <满分数字>, "reasoning": "<简短说明扣分/给分依据>"}"""
 
 
 def html_to_text(value):
@@ -179,8 +179,10 @@ def build_grading_messages(image_base64, standards):
         text_parts.append(f"【评分要求】\n{requirement}")
 
     text_parts.append(
-        "请严格根据以上依据和截图中的学生答案评分，只返回 JSON："
-        "{\"score\": <得分数字>, \"max_score\": <满分数字>, \"reasoning\": \"<简短依据>\"}"
+        "请严格根据以上依据和截图中的学生答案评分，并按学生作答、阅卷评析、成绩得分三个步骤返回。只返回 JSON："
+        "{\"student_answer\": \"<识别出的学生作答>\", "
+        "\"review_analysis\": \"<阅卷评析>\", "
+        "\"score\": <得分数字>, \"max_score\": <满分数字>, \"reasoning\": \"<简短依据>\"}"
     )
 
     parts.append({"type": "text", "text": "\n\n".join(text_parts)})
@@ -312,8 +314,16 @@ def parse_score(response_text):
             score = data.get('score')
             max_score = data.get('max_score', 0)
             reasoning = data.get('reasoning', '')
+            student_answer = data.get('student_answer', '')
+            review_analysis = data.get('review_analysis', '')
             if score is not None:
-                return {'score': score, 'max_score': max_score, 'reasoning': reasoning}
+                return {
+                    'score': score,
+                    'max_score': max_score,
+                    'reasoning': reasoning,
+                    'student_answer': student_answer,
+                    'review_analysis': review_analysis,
+                }
         except json.JSONDecodeError:
             pass
 
@@ -447,9 +457,9 @@ def grade_papers():
             print(f"[Grade] 截屏: x={cx}, y={cy}, w={cw}, h={ch}")
             image_b64 = capture_screen_base64(cx, cy, cw, ch)
             print(f"[Grade] 截屏成功, base64 长度: {len(image_b64)}")
-            add_step('capture', '截取答题卡', 'success', '截图成功', capture_started)
+            add_step('scan_card', '扫描答题卡', 'success', '答题卡区域截图完成，已发送给大模型识别', capture_started)
         except Exception as exc:
-            add_step('capture', '截取答题卡', 'error', f'截图失败：{exc}', capture_started)
+            add_step('scan_card', '扫描答题卡', 'error', f'截图失败：{exc}', capture_started)
             raise GradingError('截图答题卡失败，请检查答题卡标记区域。', code='capture_failed', status_code=500) from exc
 
         # 2. 调用 LLM 批改
@@ -478,10 +488,14 @@ def grade_papers():
             score = result['score']
             max_score = result['max_score']
             reasoning = result.get('reasoning', '')
+            student_answer = result.get('student_answer', '')
+            review_analysis = result.get('review_analysis', '')
             print(f"[Grade] 解析分数: {score}/{max_score}")
-            add_step('parse_score', '解析分数', 'success', f'解析得分：{score}/{max_score}', parse_started)
+            add_step('student_answer', '学生作答', 'success', student_answer or '模型未返回可识别的学生作答', parse_started)
+            add_step('review_analysis', '阅卷评析', 'success', review_analysis or reasoning or '模型未返回阅卷评析', parse_started)
+            add_step('score_result', '成绩得分', 'success', f'得分：{score}/{max_score}', parse_started)
         except Exception as exc:
-            add_step('parse_score', '解析分数', 'error', f'无法解析模型返回的分数：{exc}', parse_started)
+            add_step('score_result', '成绩得分', 'error', f'无法解析模型返回的分数：{exc}', parse_started)
             raise GradingError('无法解析模型返回的分数，请重试或调整评分提示。', code='score_parse_failed',
                                status_code=422) from exc
 
@@ -523,6 +537,8 @@ def grade_papers():
             'score': score,
             'max_score': max_score,
             'reasoning': reasoning,
+            'student_answer': student_answer,
+            'review_analysis': review_analysis,
             'steps': steps
         })
 
@@ -617,7 +633,6 @@ def get_hwid():
 
 @app.route('/api/activate', methods=['POST'])
 def activate():
-    from license import validate_license_key, store_license
     data = request.json
     license_key = data.get('licenseKey', '').strip()
     if not license_key:

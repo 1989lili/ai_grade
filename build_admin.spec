@@ -20,7 +20,6 @@ a = Analysis(
         (os.path.join(conda_bin, 'sqlite3.dll'), '.'),
         (os.path.join(conda_bin, 'liblzma.dll'), '.'),
         (os.path.join(conda_bin, 'libbz2.dll'), '.'),
-        (os.path.join(conda_bin, 'libmpdec-4.dll'), '.'),
         (os.path.join(conda_bin, 'libexpat.dll'), '.'),
     ],
     datas=[
@@ -53,6 +52,8 @@ a = Analysis(
         'proxy_tools',
         'clr_loader',
         'requests',
+        'pymysql',
+        'pymysql.cursors',
     ] + flask_hiddenimports + werkzeug_hiddenimports + webview_hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -59,6 +59,9 @@ def validate_license_key(license_key_str):
         payload = json.loads(payload_json.decode())
         current_hwid = generate_hwid()
 
+        if payload.get('product') != 'ai_grade':
+            return False, "许可证产品不匹配"
+
         if not _hwid_fuzzy_match(payload['hwid'], current_hwid):
             return False, "许可证不匹配当前设备"
 

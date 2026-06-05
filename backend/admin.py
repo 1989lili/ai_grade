@@ -95,8 +95,11 @@ def api_generate():
     if expiry_days:
         expiry = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=int(expiry_days))).isoformat()
 
-    license_key = sign_license(hwid, int(expiry_days) if expiry_days else None)
-    add_activation(hwid, license_key, expiry, device_label, note)
+    try:
+        license_key = sign_license(hwid, int(expiry_days) if expiry_days else None)
+        add_activation(hwid, license_key, expiry, device_label, note)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'数据库写入失败: {e}'})
 
     return jsonify({
         'status': 'success',
