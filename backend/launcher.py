@@ -49,7 +49,7 @@ _marker_queue = queue.Queue()  # 主线程 → tkinter 线程
 
 
 class TkMarker:
-    """由四条独立细窗口组成的空心虚线标记框。框内没有窗口区域，不遮挡内容。"""
+    """由四条独立细窗口组成的空心虚线标记框，内部透明热区用于拖动。"""
 
     _BORDER = 6
     _RESIZE_MARGIN = 24
@@ -79,6 +79,17 @@ class TkMarker:
         self._wins = {}
         self._canvases = {}
         self._line_ids = {}
+
+        self._drag_win = tk.Toplevel(root)
+        self._drag_win.overrideredirect(True)
+        self._drag_win.attributes('-topmost', True)
+        self._drag_win.attributes('-toolwindow', True)
+        self._drag_win.attributes('-alpha', 0.01)
+        self._drag_win.configure(bg=MARKER_TRANSPARENT_COLOR, cursor='fleur')
+        self._drag_win.withdraw()
+        self._drag_win.bind('<Button-1>', lambda e: self._on_press(e, 'inner'))
+        self._drag_win.bind('<B1-Motion>', self._on_move)
+        self._drag_win.bind('<ButtonRelease-1>', self._on_release)
 
         for part in ('top', 'bottom', 'left', 'right'):
             win = tk.Toplevel(root)
@@ -137,6 +148,8 @@ class TkMarker:
                 return 'ne'
             if ry >= h - m:
                 return 'se'
+            return 'move'
+        if part == 'inner':
             return 'move'
         return 'move'
 
@@ -197,6 +210,10 @@ class TkMarker:
         x, y, w, h = self._rect['x'], self._rect['y'], self._rect['w'], self._rect['h']
         b = self._BORDER
 
+        inner_w = max(1, w - b * 2)
+        inner_h = max(1, h - b * 2)
+        self._drag_win.geometry(f'{inner_w}x{inner_h}+{x + b}+{y + b}')
+
         self._wins['top'].geometry(f'{w}x{b}+{x}+{y}')
         self._wins['bottom'].geometry(f'{w}x{b}+{x}+{y + h - b}')
         self._wins['left'].geometry(f'{b}x{h}+{x}+{y}')
@@ -218,22 +235,80 @@ class TkMarker:
     def _show(self, x, y, w, h):
         self._rect = {'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)}
         self._layout()
+        self._drag_win.deiconify()
+        self._drag_win.lift()
         for win in self._wins.values():
             win.deiconify()
             win.lift()
         self._visible = True
 
     def _hide(self):
+        self._drag_win.withdraw()
         for win in self._wins.values():
             win.withdraw()
         self._visible = False
 
     def _destroy(self):
+        self._drag_win.destroy()
         for win in list(self._wins.values()):
             win.destroy()
         self._wins.clear()
         self._canvases.clear()
         self._line_ids.clear()
+
+
+class TkScanLine:
+    """答题卡区域扫描线动画。只显示一条横线，扫完自动隐藏。"""
+
+    def __init__(self, root):
+        import tkinter as tk
+        self._root = root
+        self._win = tk.Toplevel(root)
+        self._win.overrideredirect(True)
+        self._win.attributes('-topmost', True)
+        self._win.attributes('-toolwindow', True)
+        self._win.configure(bg='#00f2fe')
+        self._win.withdraw()
+        self._job = None
+
+    def start(self, x, y, w, h, duration_ms=900):
+        self.hide()
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        duration_ms = max(200, int(duration_ms))
+        line_h = 4
+        frames = max(12, duration_ms // 16)
+        step = 0
+
+        def draw():
+            nonlocal step
+            if step > frames:
+                self.hide()
+                return
+            ratio = step / frames
+            line_y = y + int(max(0, h - line_h) * ratio)
+            self._win.geometry(f'{max(1, w)}x{line_h}+{x}+{line_y}')
+            self._win.deiconify()
+            self._win.lift()
+            step += 1
+            self._job = self._root.after(max(1, duration_ms // frames), draw)
+
+        draw()
+
+    def hide(self):
+        if self._job:
+            try:
+                self._root.after_cancel(self._job)
+            except Exception:
+                pass
+            self._job = None
+        self._win.withdraw()
+
+    def destroy(self):
+        self.hide()
+        self._win.destroy()
+
+    def _destroy(self):
+        self.destroy()
 
 def _tk_marker_main(markers_out, ready_event):
     """在独立线程中：创建 tk root → 创建标记窗口 → 进入 mainloop"""
@@ -244,6 +319,7 @@ def _tk_marker_main(markers_out, ready_event):
 
     for mt in ('card', 'score', 'submit'):
         markers_out[mt] = TkMarker(root, mt)
+    markers_out['_scan_line'] = TkScanLine(root)
 
     ready_event.set()
 
@@ -261,6 +337,15 @@ def _tk_marker_main(markers_out, ready_event):
                     m = markers_out.get(cmd[1])
                     if m:
                         m._hide()
+                elif action == 'scan_card':
+                    _, x, y, w, h, duration_ms = cmd
+                    scan_line = markers_out.get('_scan_line')
+                    if scan_line:
+                        scan_line.start(x, y, w, h, duration_ms)
+                elif action == 'hide_scan':
+                    scan_line = markers_out.get('_scan_line')
+                    if scan_line:
+                        scan_line.hide()
                 elif action == 'destroy':
                     for m in list(markers_out.values()):
                         m._destroy()
@@ -411,6 +496,12 @@ class WindowApi:
 
     def show_marker_at(self, mtype, x, y, w, h):
         _marker_queue.put(('show', mtype, int(x), int(y), int(w), int(h)))
+
+    def scan_card_area(self, x, y, w, h, duration_ms=900):
+        _marker_queue.put(('scan_card', int(x), int(y), int(w), int(h), int(duration_ms)))
+
+    def hide_scan_line(self):
+        _marker_queue.put(('hide_scan',))
 
     def get_marker_rect(self, mtype):
         m = self._markers.get(mtype)

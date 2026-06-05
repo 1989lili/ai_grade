@@ -975,12 +975,6 @@ document.addEventListener('DOMContentLoaded', function() {
             markersHidden = false;
         }
 
-        if (api.hide_all_markers) {
-            api.hide_all_markers();
-            markersHidden = true;
-            await new Promise(resolve => setTimeout(resolve, 150));
-        }
-
         debugInput.value = '正在扫描答题卡...';
         debugInput.classList.remove('task-completed');
         progressFill.classList.remove('task-completed');
@@ -990,6 +984,16 @@ document.addEventListener('DOMContentLoaded', function() {
         startScanAnimation();
 
         try {
+            if (api.scan_card_area) {
+                api.scan_card_area(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 900);
+                await new Promise(resolve => setTimeout(resolve, 950));
+            }
+            if (api.hide_all_markers) {
+                api.hide_all_markers();
+                markersHidden = true;
+                await new Promise(resolve => setTimeout(resolve, 150));
+            }
+
             debugInput.value = '正在调用AI模型批改...';
             progressFill.style.width = '50%';
             progressText.textContent = '模型调用中...';
