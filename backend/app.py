@@ -305,47 +305,68 @@ def call_llm_for_grading(provider, api_key, model_name, image_base64, standards)
 # ---------- 分数解析 ----------
 
 def parse_score(response_text):
-    """从 LLM 响应中提取分数"""
-    # 尝试 JSON 解析
-    json_match = re.search(r'\{[^{}]*"score"[^{}]*\}', response_text, re.DOTALL)
+    """从 LLM 响应中提取分数和结构化阅卷内容。"""
+    text = (response_text or '').strip()
+
+    def normalize_result(data):
+        score = data.get('score')
+        if score is None:
+            return None
+        return {
+            'score': score,
+            'max_score': data.get('max_score', 0),
+            'reasoning': data.get('reasoning', ''),
+            'student_answer': data.get('student_answer', ''),
+            'review_analysis': data.get('review_analysis', ''),
+        }
+
+    candidates = [text]
+    fenced_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL | re.IGNORECASE)
+    if fenced_match:
+        candidates.append(fenced_match.group(1).strip())
+    if '{' in text and '}' in text:
+        candidates.append(text[text.find('{'):text.rfind('}') + 1].strip())
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                result = normalize_result(parsed)
+                if result:
+                    return result
+        except json.JSONDecodeError:
+            pass
+
+    json_match = re.search(r'\{[^{}]*"score"[^{}]*\}', text, re.DOTALL)
     if json_match:
         try:
             data = json.loads(json_match.group())
-            score = data.get('score')
-            max_score = data.get('max_score', 0)
-            reasoning = data.get('reasoning', '')
-            student_answer = data.get('student_answer', '')
-            review_analysis = data.get('review_analysis', '')
-            if score is not None:
-                return {
-                    'score': score,
-                    'max_score': max_score,
-                    'reasoning': reasoning,
-                    'student_answer': student_answer,
-                    'review_analysis': review_analysis,
-                }
+            result = normalize_result(data)
+            if result:
+                return result
         except json.JSONDecodeError:
             pass
 
     # 尝试中文格式：得分: 8/10、分数: 8
-    cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)', response_text)
+    cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
     if cn_match:
         return {'score': float(cn_match.group(1)), 'max_score': int(cn_match.group(2)),
-                'reasoning': response_text}
+                'reasoning': text, 'student_answer': '', 'review_analysis': ''}
 
     # 尝试纯数字：8/10
-    num_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+)', response_text)
+    num_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
     if num_match:
         return {'score': float(num_match.group(1)), 'max_score': int(num_match.group(2)),
-                'reasoning': response_text}
+                'reasoning': text, 'student_answer': '', 'review_analysis': ''}
 
     # 尝试单独的数字
-    single_match = re.search(r'(?:score|分数|得分)[^\d]*(\d+(?:\.\d+)?)', response_text, re.IGNORECASE)
+    single_match = re.search(r'(?:score|分数|得分)[^\d]*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
     if single_match:
         score = float(single_match.group(1))
-        return {'score': score, 'max_score': 0, 'reasoning': response_text}
+        return {'score': score, 'max_score': 0, 'reasoning': text,
+                'student_answer': '', 'review_analysis': ''}
 
-    raise ValueError(f"无法从响应中解析分数: {response_text[:200]}")
+    raise ValueError(f"无法从响应中解析分数: {text[:200]}")
 
 
 # ---------- API 端点 ----------
@@ -410,129 +431,82 @@ def test_model():
         return jsonify({'response': error_msg})
 
 
-@app.route('/api/grade', methods=['POST'])
-def grade_papers():
-    data = request.json
+def build_step(steps, key, label, status='success', message='', started_at=None, extra=None):
+    step = {
+        'key': key,
+        'label': label,
+        'status': status,
+        'message': message,
+    }
+    if started_at is not None:
+        step['duration_ms'] = int((time.monotonic() - started_at) * 1000)
+    if extra:
+        step.update(extra)
+    steps.append(step)
+    return step
+
+
+def analyze_card_grading(data):
     steps = []
-
-    def add_step(key, label, status='success', message='', started_at=None, extra=None):
-        step = {
-            'key': key,
-            'label': label,
-            'status': status,
-            'message': message,
-        }
-        if started_at is not None:
-            step['duration_ms'] = int((time.monotonic() - started_at) * 1000)
-        if extra:
-            step.update(extra)
-        steps.append(step)
-        return step
-
-    def error_response(message, code='grading_error', status_code=500):
-        return jsonify({'status': 'error', 'code': code, 'message': message, 'steps': steps}), status_code
-
     if not data:
-        return error_response('请求数据为空', 'empty_request', 400)
+        raise GradingError('请求数据为空', 'empty_request', 400, detail={'steps': steps})
 
     card_area = data.get('cardArea')
-    score_box = data.get('scoreBox')
-    submit_btn = data.get('submitBtn')
     standards = data.get('standards', {})
     api_key = data.get('apiKey', '')
     model_name = data.get('modelName', '')
     provider = data.get('provider', '')
 
-    # 验证
     if not api_key:
-        return error_response('请先在AI配置页面填写API Key', 'missing_api_key', 400)
+        raise GradingError('请先在AI配置页面填写API Key', 'missing_api_key', 400, detail={'steps': steps})
     if not card_area:
-        return error_response('请先框定答题卡区域', 'missing_card_area', 400)
+        raise GradingError('请先框定答题卡区域', 'missing_card_area', 400, detail={'steps': steps})
 
+    capture_started = time.monotonic()
     try:
-        # 1. 截屏
-        capture_started = time.monotonic()
-        try:
-            cx, cy, cw, ch = card_area['x'], card_area['y'], card_area['w'], card_area['h']
-            print(f"[Grade] 截屏: x={cx}, y={cy}, w={cw}, h={ch}")
-            image_b64 = capture_screen_base64(cx, cy, cw, ch)
-            print(f"[Grade] 截屏成功, base64 长度: {len(image_b64)}")
-            add_step('scan_card', '扫描答题卡', 'success', '答题卡区域截图完成，已发送给大模型识别', capture_started)
-        except Exception as exc:
-            add_step('scan_card', '扫描答题卡', 'error', f'截图失败：{exc}', capture_started)
-            raise GradingError('截图答题卡失败，请检查答题卡标记区域。', code='capture_failed', status_code=500) from exc
+        cx, cy, cw, ch = card_area['x'], card_area['y'], card_area['w'], card_area['h']
+        print(f"[Grade] 截屏: x={cx}, y={cy}, w={cw}, h={ch}")
+        image_b64 = capture_screen_base64(cx, cy, cw, ch)
+        print(f"[Grade] 截屏成功, base64 长度: {len(image_b64)}")
+        build_step(steps, 'capture_card', '截取答题卡区域', 'success', '已截取答题卡区域，准备调用模型识别', capture_started)
+    except Exception as exc:
+        build_step(steps, 'capture_card', '截取答题卡区域', 'error', f'截图失败：{exc}', capture_started)
+        raise GradingError('截图答题卡失败，请检查答题卡标记区域。', code='capture_failed', status_code=500,
+                           detail={'steps': steps}) from exc
 
-        # 2. 调用 LLM 批改
-        model_started = time.monotonic()
-        try:
-            print(f"[Grade] 调用模型: provider={provider}, model={model_name}")
-            llm_result = call_llm_for_grading(provider, api_key, model_name, image_b64, standards)
-            response_text = llm_result['content']
-            print(f"[Grade] 模型响应: {response_text[:200]}")
-            add_step(
-                'model_call',
-                '调用AI模型',
-                'success',
-                f"模型返回成功，尝试次数：{llm_result.get('attempts', 1)}",
-                model_started,
-                {'attempts': llm_result.get('attempts', 1), 'model': model_name, 'provider': provider}
-            )
-        except GradingError as exc:
-            add_step('model_call', '调用AI模型', 'error', exc.message, model_started)
-            raise
+    model_started = time.monotonic()
+    try:
+        print(f"[Grade] 调用模型: provider={provider}, model={model_name}")
+        llm_result = call_llm_for_grading(provider, api_key, model_name, image_b64, standards)
+        response_text = llm_result['content']
+        print(f"[Grade] 模型响应: {response_text[:200]}")
+        build_step(
+            steps,
+            'model_call',
+            '调用AI识别与评分模型',
+            'success',
+            f"模型已完成答题卡识别与评分，尝试次数：{llm_result.get('attempts', 1)}",
+            model_started,
+            {'attempts': llm_result.get('attempts', 1), 'model': model_name, 'provider': provider}
+        )
+    except GradingError as exc:
+        build_step(steps, 'model_call', '调用AI识别与评分模型', 'error', exc.message, model_started)
+        exc.detail = {'steps': steps}
+        raise
 
-        # 3. 解析分数
-        parse_started = time.monotonic()
-        try:
-            result = parse_score(response_text)
-            score = result['score']
-            max_score = result['max_score']
-            reasoning = result.get('reasoning', '')
-            student_answer = result.get('student_answer', '')
-            review_analysis = result.get('review_analysis', '')
-            print(f"[Grade] 解析分数: {score}/{max_score}")
-            add_step('student_answer', '学生作答', 'success', student_answer or '模型未返回可识别的学生作答', parse_started)
-            add_step('review_analysis', '阅卷评析', 'success', review_analysis or reasoning or '模型未返回阅卷评析', parse_started)
-            add_step('score_result', '成绩得分', 'success', f'得分：{score}/{max_score}', parse_started)
-        except Exception as exc:
-            add_step('score_result', '成绩得分', 'error', f'无法解析模型返回的分数：{exc}', parse_started)
-            raise GradingError('无法解析模型返回的分数，请重试或调整评分提示。', code='score_parse_failed',
-                               status_code=422) from exc
-
-        # 4. 桌面自动化 - 填分
-        fill_started = time.monotonic()
-        if score_box:
-            try:
-                sx = score_box['x'] + score_box['w'] / 2
-                sy = score_box['y'] + score_box['h'] / 2
-                print(f"[Grade] 填分: click ({sx}, {sy}), score={score}")
-                auto_fill_score(sx, sy, score)
-                add_step('fill_score', '填写分数', 'success', f'已填入分数：{score}', fill_started)
-            except Exception as exc:
-                add_step('fill_score', '填写分数', 'error', f'填写分数失败：{exc}', fill_started)
-                raise GradingError('填写分数失败，请检查打分框标记位置。', code='fill_score_failed',
-                                   status_code=500) from exc
-        else:
-            add_step('fill_score', '填写分数', 'error', '未设置打分框位置', fill_started)
-            raise GradingError('请先框定打分框位置。', code='missing_score_box', status_code=400)
-
-        # 5. 桌面自动化 - 提交
-        submit_started = time.monotonic()
-        if submit_btn:
-            try:
-                bx = submit_btn['x'] + submit_btn['w'] / 2
-                by = submit_btn['y'] + submit_btn['h'] / 2
-                print(f"[Grade] 提交: click ({bx}, {by})")
-                auto_click_submit(bx, by)
-                add_step('submit', '提交结果', 'success', '已点击提交按钮', submit_started)
-            except Exception as exc:
-                add_step('submit', '提交结果', 'error', f'提交失败：{exc}', submit_started)
-                raise GradingError('提交失败，请检查提交按钮标记位置。', code='submit_failed', status_code=500) from exc
-        else:
-            add_step('submit', '提交结果', 'error', '未设置提交按钮位置', submit_started)
-            raise GradingError('请先框定提交按钮位置。', code='missing_submit_button', status_code=400)
-
-        return jsonify({
+    parse_started = time.monotonic()
+    try:
+        parsed = parse_score(response_text)
+        score = parsed['score']
+        max_score = parsed['max_score']
+        reasoning = parsed.get('reasoning', '')
+        student_answer = parsed.get('student_answer', '')
+        review_analysis = parsed.get('review_analysis', '')
+        print(f"[Grade] 解析分数: {score}/{max_score}")
+        build_step(steps, 'student_answer', '识别学生作答', 'success', student_answer or '模型未返回可识别的学生作答', parse_started)
+        build_step(steps, 'review_analysis', '生成阅卷评析', 'success', review_analysis or reasoning or '模型未返回阅卷评析', parse_started)
+        build_step(steps, 'score_result', '计算成绩得分', 'success', f'得分：{score}/{max_score}', parse_started)
+        return {
             'status': 'success',
             'score': score,
             'max_score': max_score,
@@ -540,13 +514,107 @@ def grade_papers():
             'student_answer': student_answer,
             'review_analysis': review_analysis,
             'steps': steps
-        })
+        }
+    except Exception as exc:
+        build_step(steps, 'score_result', '计算成绩得分', 'error', f'无法解析模型返回的分数：{exc}', parse_started)
+        raise GradingError('无法解析模型返回的分数，请重试或调整评分提示。', code='score_parse_failed',
+                           status_code=422, detail={'steps': steps}) from exc
 
-    except GradingError as e:
-        return error_response(e.message, e.code, e.status_code)
-    except Exception as e:
+
+def apply_grading_result(data):
+    steps = []
+    if not data:
+        raise GradingError('请求数据为空', 'empty_request', 400, detail={'steps': steps})
+
+    score = data.get('score')
+    score_box = data.get('scoreBox')
+    submit_btn = data.get('submitBtn')
+
+    if score is None:
+        raise GradingError('缺少待填写分数。', code='missing_score', status_code=400, detail={'steps': steps})
+
+    fill_started = time.monotonic()
+    if score_box:
+        try:
+            sx = score_box['x'] + score_box['w'] / 2
+            sy = score_box['y'] + score_box['h'] / 2
+            print(f"[Grade] 填分: click ({sx}, {sy}), score={score}")
+            auto_fill_score(sx, sy, score)
+            build_step(steps, 'fill_score', '填写分数', 'success', f'已填入分数：{score}', fill_started)
+        except Exception as exc:
+            build_step(steps, 'fill_score', '填写分数', 'error', f'填写分数失败：{exc}', fill_started)
+            raise GradingError('填写分数失败，请检查打分框标记位置。', code='fill_score_failed',
+                               status_code=500, detail={'steps': steps}) from exc
+    else:
+        build_step(steps, 'fill_score', '填写分数', 'error', '未设置打分框位置', fill_started)
+        raise GradingError('请先框定打分框位置。', code='missing_score_box', status_code=400, detail={'steps': steps})
+
+    submit_started = time.monotonic()
+    if submit_btn:
+        try:
+            bx = submit_btn['x'] + submit_btn['w'] / 2
+            by = submit_btn['y'] + submit_btn['h'] / 2
+            print(f"[Grade] 提交: click ({bx}, {by})")
+            auto_click_submit(bx, by)
+            build_step(steps, 'submit', '提交结果', 'success', '已点击提交按钮', submit_started)
+        except Exception as exc:
+            build_step(steps, 'submit', '提交结果', 'error', f'提交失败：{exc}', submit_started)
+            raise GradingError('提交失败，请检查提交按钮标记位置。', code='submit_failed', status_code=500,
+                               detail={'steps': steps}) from exc
+    else:
+        build_step(steps, 'submit', '提交结果', 'error', '未设置提交按钮位置', submit_started)
+        raise GradingError('请先框定提交按钮位置。', code='missing_submit_button', status_code=400, detail={'steps': steps})
+
+    return {'status': 'success', 'steps': steps}
+
+
+def grading_error_response(exc):
+    steps = []
+    if isinstance(exc.detail, dict):
+        steps = exc.detail.get('steps', []) or []
+    return jsonify({'status': 'error', 'code': exc.code, 'message': exc.message, 'steps': steps}), exc.status_code
+
+
+@app.route('/api/grade/analyze', methods=['POST'])
+def grade_analyze():
+    try:
+        return jsonify(analyze_card_grading(request.json))
+    except GradingError as exc:
+        return grading_error_response(exc)
+    except Exception as exc:
         traceback.print_exc()
-        return error_response('批改失败：' + str(e), 'unexpected_error', 500)
+        return jsonify({'status': 'error', 'code': 'unexpected_error', 'message': '批改失败：' + str(exc), 'steps': []}), 500
+
+
+@app.route('/api/grade/apply', methods=['POST'])
+def grade_apply():
+    try:
+        return jsonify(apply_grading_result(request.json))
+    except GradingError as exc:
+        return grading_error_response(exc)
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'code': 'unexpected_error', 'message': '填写或提交失败：' + str(exc), 'steps': []}), 500
+
+
+@app.route('/api/grade', methods=['POST'])
+def grade_papers():
+    try:
+        data = request.json
+        analyze_result = analyze_card_grading(data)
+        apply_data = {
+            'score': analyze_result['score'],
+            'scoreBox': data.get('scoreBox') if data else None,
+            'submitBtn': data.get('submitBtn') if data else None,
+        }
+        apply_result = apply_grading_result(apply_data)
+        analyze_result['steps'] = analyze_result.get('steps', []) + apply_result.get('steps', [])
+        return jsonify(analyze_result)
+    except GradingError as exc:
+        return grading_error_response(exc)
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({'status': 'error', 'code': 'unexpected_error', 'message': '批改失败：' + str(exc), 'steps': []}), 500
 
 
 # ---------- 预设管理 ----------

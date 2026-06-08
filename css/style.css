@@ -1049,27 +1049,6 @@
             background-color: #eef7ff;
         }
 
-        .process-step[data-step-key="scan_card"].running {
-            position: relative;
-            overflow: hidden;
-        }
-
-        .process-step[data-step-key="scan_card"].running::after {
-            content: '';
-            position: absolute;
-            left: 0;
-            right: 0;
-            top: -35%;
-            height: 36%;
-            background: linear-gradient(180deg, transparent, rgba(33, 150, 243, 0.28), transparent);
-            animation: scan-sweep 1.4s linear infinite;
-        }
-
-        @keyframes scan-sweep {
-            from { transform: translateY(0); }
-            to { transform: translateY(380%); }
-        }
-
         .process-step.success {
             border-left-color: #4caf50;
             background-color: #f2fbf2;
@@ -1103,6 +1082,7 @@
             font-size: 13px;
             color: #555;
             line-height: 1.45;
+            white-space: pre-wrap;
         }
 
         .process-step-duration {
