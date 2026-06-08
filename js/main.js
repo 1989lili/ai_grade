@@ -899,9 +899,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (result.status === 'success') {
             var scoreLine = document.createElement('div');
             scoreLine.className = 'result-score-line';
-            scoreLine.innerHTML = '<span class=”result-score-big”>' + result.score + '</span>' +
-                                  '<span class=”result-score-divider”> / </span>' +
-                                  '<span class=”result-score-max”>' + result.max_score + '</span>';
+            scoreLine.innerHTML = '<span class="result-score-big">' + result.score + '</span>' +
+                                  '<span class="result-score-divider"> / </span>' +
+                                  '<span class="result-score-max">' + result.max_score + '</span>';
             resultBox.appendChild(scoreLine);
 
             if (result.student_answer) {
@@ -939,7 +939,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             var errScore = document.createElement('div');
             errScore.className = 'result-score-line';
-            errScore.innerHTML = '<span style=”color:#d32f2f;font-size:20px;”>批改失败</span>';
+            errScore.innerHTML = '<span style="color:#d32f2f;font-size:20px;">批改失败</span>';
             resultBox.appendChild(errScore);
 
             var errMsg = document.createElement('div');
