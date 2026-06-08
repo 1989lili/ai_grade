@@ -1017,19 +1017,12 @@
             border-radius: 12px;
         }
 
-        .process-step-list {
-            flex: 1;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
         .process-empty {
             color: #888;
             text-align: center;
             padding: 40px 0;
             font-size: 14px;
+            flex: 1;
         }
 
         .process-step {
@@ -1111,6 +1104,49 @@
             font-weight: bold;
             color: #2e7d32;
             margin-bottom: 4px;
+        }
+
+        /* 评分结果丰富展示 */
+        .result-score-line {
+            text-align: center;
+            padding: 8px 0 12px;
+            line-height: 1;
+        }
+        .result-score-big {
+            font-size: 48px;
+            font-weight: bold;
+            color: #2e7d32;
+        }
+        .result-score-divider {
+            font-size: 24px;
+            color: #999;
+            vertical-align: middle;
+        }
+        .result-score-max {
+            font-size: 28px;
+            color: #666;
+            vertical-align: middle;
+        }
+        .result-section-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #555;
+            margin-top: 10px;
+            margin-bottom: 4px;
+            padding-top: 8px;
+            border-top: 1px solid #e8e8e8;
+        }
+        .result-section-content {
+            font-size: 13px;
+            color: #333;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* 流式内容展示 */
+        .stream-content {
+            font-family: 'Microsoft YaHei', sans-serif;
         }
 
         .footer {

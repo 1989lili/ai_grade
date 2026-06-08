@@ -759,23 +759,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let gradingTimer = null;
     let gradingStartedAt = null;
-    let currentProcessSteps = [];
-
-    const INITIAL_GRADING_STEPS = [
-        { key: 'capture_card', label: '截取答题卡区域', status: 'pending', message: '等待扫描答题卡区域' },
-        { key: 'model_call', label: '调用AI识别与评分模型', status: 'pending', message: '等待模型识别和评分' },
-        { key: 'student_answer', label: '识别学生作答', status: 'pending', message: '等待识别学生作答' },
-        { key: 'review_analysis', label: '生成阅卷评析', status: 'pending', message: '等待生成阅卷评析' },
-        { key: 'score_result', label: '计算成绩得分', status: 'pending', message: '等待计算成绩得分' },
-        { key: 'fill_score', label: '填写分数', status: 'pending', message: '等待填写分数' },
-        { key: 'submit', label: '提交结果', status: 'pending', message: '等待提交结果' }
-    ];
-
-    function formatDuration(ms) {
-        if (ms === undefined || ms === null || isNaN(ms)) return '';
-        if (ms < 1000) return ms + 'ms';
-        return (ms / 1000).toFixed(1) + '秒';
-    }
 
     function formatElapsed(seconds) {
         var min = Math.floor(seconds / 60);
@@ -805,13 +788,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function statusText(status) {
-        if (status === 'running') return '进行中';
-        if (status === 'success') return '完成';
-        if (status === 'error') return '失败';
-        return '等待';
-    }
-
     function activateMainTab(tabId) {
         var target = document.getElementById(tabId);
         if (!target) return;
@@ -822,86 +798,51 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function mergeProcessSteps(nextSteps) {
-        if (!nextSteps || !nextSteps.length) return;
-        nextSteps.forEach(function(nextStep) {
-            var found = false;
-            currentProcessSteps = currentProcessSteps.map(function(step) {
-                if (step.key === nextStep.key) {
-                    found = true;
-                    return Object.assign({}, step, nextStep);
+    async function readNdjsonStream(response, onEvent) {
+        if (!response.ok) {
+            throw new Error('流式接口请求失败，HTTP状态：' + response.status);
+        }
+        if (!response.body || !response.body.getReader) {
+            throw new Error('当前环境不支持流式读取响应');
+        }
+
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder('utf-8');
+        var buffer = '';
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line) continue;
+                var event;
+                try {
+                    event = JSON.parse(line);
+                } catch (error) {
+                    throw new Error('解析流式响应失败：' + error.message);
                 }
-                return step;
-            });
-            if (!found) currentProcessSteps.push(Object.assign({}, nextStep));
-        });
-        renderProcessSteps(currentProcessSteps);
-    }
-
-    function renderProcessSteps(steps) {
-        var list = document.getElementById('grading-step-list');
-        if (!list) return;
-        currentProcessSteps = steps.map(function(step) { return Object.assign({}, step); });
-        list.innerHTML = '';
-        if (!currentProcessSteps.length) {
-            var empty = document.createElement('div');
-            empty.className = 'process-empty';
-            empty.textContent = '点击“批改”后显示评分过程';
-            list.appendChild(empty);
-            return;
-        }
-        currentProcessSteps.forEach(function(step) {
-            var item = document.createElement('div');
-            item.className = 'process-step ' + (step.status || 'pending');
-            item.dataset.stepKey = step.key || '';
-
-            var top = document.createElement('div');
-            top.className = 'process-step-top';
-
-            var label = document.createElement('div');
-            label.className = 'process-step-label';
-            label.textContent = step.label || step.key || '';
-
-            var status = document.createElement('div');
-            status.className = 'process-step-status';
-            status.textContent = statusText(step.status);
-
-            top.appendChild(label);
-            top.appendChild(status);
-            item.appendChild(top);
-
-            var message = document.createElement('div');
-            message.className = 'process-step-message';
-            message.textContent = step.message || '';
-            item.appendChild(message);
-
-            if (step.duration_ms !== undefined && step.duration_ms !== null) {
-                var duration = document.createElement('div');
-                duration.className = 'process-step-duration';
-                duration.textContent = '耗时：' + formatDuration(step.duration_ms);
-                item.appendChild(duration);
+                await onEvent(event);
             }
-
-            list.appendChild(item);
-        });
-    }
-
-    function updateProcessStep(key, status, message, durationMs) {
-        var found = false;
-        currentProcessSteps = currentProcessSteps.map(function(step) {
-            if (step.key === key) {
-                found = true;
-                return Object.assign({}, step, { status: status, message: message, duration_ms: durationMs });
-            }
-            return step;
-        });
-        if (!found) {
-            currentProcessSteps.push({ key: key, label: key, status: status, message: message, duration_ms: durationMs });
         }
-        renderProcessSteps(currentProcessSteps);
+
+        buffer += decoder.decode();
+        var finalLine = buffer.trim();
+        if (finalLine) {
+            var finalEvent;
+            try {
+                finalEvent = JSON.parse(finalLine);
+            } catch (error) {
+                throw new Error('解析流式响应失败：' + error.message);
+            }
+            await onEvent(finalEvent);
+        }
     }
 
-    function resetGradingProcess() {
+    function resetGradingUI() {
         stopElapsedTimer();
         setElapsedText('未开始');
         var resultBox = document.getElementById('grading-result');
@@ -909,7 +850,44 @@ document.addEventListener('DOMContentLoaded', function() {
             resultBox.classList.remove('active');
             resultBox.textContent = '';
         }
-        renderProcessSteps(INITIAL_GRADING_STEPS);
+        hideStreamContent();
+    }
+
+    function setupStreamContentArea() {
+        var panel = document.querySelector('#scoring-process-tab .process-panel');
+        if (!panel) return;
+        var existing = document.getElementById('grading-stream-content');
+        if (!existing) {
+            var div = document.createElement('div');
+            div.id = 'grading-stream-content';
+            div.className = 'stream-content';
+            div.style.cssText = 'display:none;margin:8px 0;padding:14px 16px;background:rgba(0,0,0,0.02);border-radius:8px;flex:1;overflow-y:auto;font-size:14px;line-height:1.8;white-space:pre-wrap;word-break:break-word;border:1px solid rgba(0,0,0,0.06);min-height:200px;';
+            var header = document.querySelector('#scoring-process-tab .process-header');
+            if (header && header.parentNode) {
+                header.parentNode.insertBefore(div, header.nextSibling);
+            } else {
+                panel.insertBefore(div, panel.firstChild);
+            }
+        }
+    }
+
+    function showStreamContent(text) {
+        var box = document.getElementById('grading-stream-content');
+        if (!box) { setupStreamContentArea(); box = document.getElementById('grading-stream-content'); }
+        if (!box) return;
+        // 隐藏占位提示
+        var placeholder = document.getElementById('grading-stream-placeholder');
+        if (placeholder) placeholder.style.display = 'none';
+        box.style.display = 'block';
+        box.textContent = text;
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function hideStreamContent() {
+        var box = document.getElementById('grading-stream-content');
+        if (box) box.style.display = 'none';
+        var placeholder = document.getElementById('grading-stream-placeholder');
+        if (placeholder) placeholder.style.display = '';
     }
 
     function showGradingResult(result) {
@@ -918,21 +896,58 @@ document.addEventListener('DOMContentLoaded', function() {
         resultBox.textContent = '';
         resultBox.classList.add('active');
 
-        var score = document.createElement('div');
-        score.className = 'score';
         if (result.status === 'success') {
-            score.textContent = '得分：' + result.score + ' / ' + result.max_score;
-        } else {
-            score.textContent = '批改失败';
-            score.style.color = '#d32f2f';
-        }
-        resultBox.appendChild(score);
+            var scoreLine = document.createElement('div');
+            scoreLine.className = 'result-score-line';
+            scoreLine.innerHTML = '<span class=”result-score-big”>' + result.score + '</span>' +
+                                  '<span class=”result-score-divider”> / </span>' +
+                                  '<span class=”result-score-max”>' + result.max_score + '</span>';
+            resultBox.appendChild(scoreLine);
 
-        var reason = document.createElement('div');
-        reason.textContent = result.status === 'success'
-            ? ('评分依据：' + (result.reasoning || '模型未返回评分依据'))
-            : (result.message || '批改失败');
-        resultBox.appendChild(reason);
+            if (result.student_answer) {
+                var saTitle = document.createElement('div');
+                saTitle.className = 'result-section-title';
+                saTitle.textContent = '学生作答';
+                resultBox.appendChild(saTitle);
+                var saContent = document.createElement('div');
+                saContent.className = 'result-section-content';
+                saContent.textContent = result.student_answer;
+                resultBox.appendChild(saContent);
+            }
+
+            if (result.review_analysis) {
+                var raTitle = document.createElement('div');
+                raTitle.className = 'result-section-title';
+                raTitle.textContent = '阅卷评析';
+                resultBox.appendChild(raTitle);
+                var raContent = document.createElement('div');
+                raContent.className = 'result-section-content';
+                raContent.textContent = result.review_analysis;
+                resultBox.appendChild(raContent);
+            }
+
+            if (result.reasoning) {
+                var rTitle = document.createElement('div');
+                rTitle.className = 'result-section-title';
+                rTitle.textContent = '评分依据';
+                resultBox.appendChild(rTitle);
+                var rContent = document.createElement('div');
+                rContent.className = 'result-section-content';
+                rContent.textContent = result.reasoning;
+                resultBox.appendChild(rContent);
+            }
+        } else {
+            var errScore = document.createElement('div');
+            errScore.className = 'result-score-line';
+            errScore.innerHTML = '<span style=”color:#d32f2f;font-size:20px;”>批改失败</span>';
+            resultBox.appendChild(errScore);
+
+            var errMsg = document.createElement('div');
+            errMsg.className = 'result-section-content';
+            errMsg.textContent = result.message || '批改失败';
+            errMsg.style.color = '#d32f2f';
+            resultBox.appendChild(errMsg);
+        }
     }
 
     async function startGrading() {
@@ -943,7 +958,6 @@ document.addEventListener('DOMContentLoaded', function() {
         var api = (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
         if (!api) { alert('API 未就绪，请稍候再试'); return; }
 
-        // 检查是否已激活所有标记
         var rects = await api.get_all_marker_rects();
         if (!rects || !rects.card || !rects.score || !rects.submit) {
             alert('请先完成所有标记设置（答题卡区域、打分框位置、提交按钮位置）');
@@ -962,53 +976,44 @@ document.addEventListener('DOMContentLoaded', function() {
         var markersHidden = false;
 
         function restoreMarkers() {
-            if (!markersHidden || !api.show_marker_at) return;
+            if (!markersHidden || !api || !api.show_marker_at) return;
             api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
             api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
             api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
             markersHidden = false;
         }
 
-        async function readJsonResponse(response) {
-            try {
-                return await response.json();
-            } catch (jsonError) {
-                return {
-                    status: 'error',
-                    message: '服务器返回了非JSON响应，HTTP状态：' + response.status,
-                    steps: currentProcessSteps
-                };
-            }
-        }
-
         activateMainTab('scoring-process-tab');
-        resetGradingProcess();
-        debugInput.value = '正在扫描答题卡区域...';
+        resetGradingUI();
+        setupStreamContentArea();
+        debugInput.value = '正在启动评分流程...';
         debugInput.classList.remove('task-completed');
         progressFill.classList.remove('task-completed');
-        progressFill.style.width = '15%';
-        progressText.textContent = '扫描中...';
+        progressFill.style.width = '10%';
+        progressText.textContent = '准备中...';
         startElapsedTimer();
-        updateProcessStep('capture_card', 'running', '正在扫描答题卡区域...');
+
+        // ── 启动持续扫描动画 ──
+        if (api.scan_card_area_loop) {
+            api.scan_card_area_loop(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 800);
+        } else if (api.scan_card_area) {
+            api.scan_card_area(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 900);
+        }
+
+        if (api.hide_all_markers) {
+            api.hide_all_markers();
+            markersHidden = true;
+            await new Promise(function(resolve) { setTimeout(resolve, 150); });
+        }
 
         try {
-            if (api.scan_card_area) {
-                api.scan_card_area(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 900);
-                await new Promise(resolve => setTimeout(resolve, 950));
-            }
-            if (api.hide_all_markers) {
-                api.hide_all_markers();
-                markersHidden = true;
-                await new Promise(resolve => setTimeout(resolve, 150));
-            }
-
-            updateProcessStep('capture_card', 'running', '正在截取干净的答题卡区域...');
-            updateProcessStep('model_call', 'running', '正在将答题卡截图发送给AI模型识别与评分...');
             debugInput.value = '正在调用AI模型识别答题卡...';
-            progressFill.style.width = '45%';
-            progressText.textContent = '模型识别中...';
+            progressFill.style.width = '25%';
+            progressText.textContent = 'AI评分中...';
 
-            var analyzeResponse = await fetch('/api/grade/analyze', {
+            var analyzeResult = null;
+            var streamText = '';
+            var analyzeResponse = await fetch('/api/grade/analyze-stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1019,18 +1024,43 @@ document.addEventListener('DOMContentLoaded', function() {
                     modelName: config.modelName
                 })
             });
-            var analyzeResult = await readJsonResponse(analyzeResponse);
-            if (analyzeResult.steps && analyzeResult.steps.length) {
-                mergeProcessSteps(analyzeResult.steps);
-            }
-            if (analyzeResult.status !== 'success') {
-                throw new Error(analyzeResult.message || '答题卡识别或评分失败');
+
+            await readNdjsonStream(analyzeResponse, async function(event) {
+                if (event.type === 'status') {
+                    debugInput.value = event.message || '处理中...';
+                    progressFill.style.width = Math.min(30 + Math.floor((event.elapsed_ms || 0) / 2000), 65) + '%';
+                    return;
+                }
+
+                if (event.type === 'token') {
+                    streamText += event.content || '';
+                    showStreamContent(streamText);
+                    debugInput.value = 'AI评分内容接收中...';
+                    progressFill.style.width = Math.min(30 + Math.floor(streamText.length / 25), 70) + '%';
+                    return;
+                }
+
+                if (event.type === 'final') {
+                    analyzeResult = event.result;
+                    progressFill.style.width = '75%';
+                    progressText.textContent = '评分完成';
+                    return;
+                }
+
+                if (event.type === 'error') {
+                    throw new Error(event.message || '答题卡识别或评分失败');
+                }
+            });
+
+            if (!analyzeResult || analyzeResult.status !== 'success') {
+                throw new Error((analyzeResult && analyzeResult.message) || '答题卡识别或评分失败');
             }
 
+            if (api.hide_scan_line) api.hide_scan_line();
+
             debugInput.value = '正在填写分数并提交...';
-            progressFill.style.width = '75%';
+            progressFill.style.width = '80%';
             progressText.textContent = '填写提交中...';
-            updateProcessStep('fill_score', 'running', '正在定位打分框并填写模型给出的分数...');
 
             var applyResponse = await fetch('/api/grade/apply', {
                 method: 'POST',
@@ -1041,9 +1071,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     submitBtn: submitBtn
                 })
             });
-            var applyResult = await readJsonResponse(applyResponse);
-            if (applyResult.steps && applyResult.steps.length) {
-                mergeProcessSteps(applyResult.steps);
+            var applyResult;
+            try {
+                applyResult = await applyResponse.json();
+            } catch (e) {
+                applyResult = { status: 'error', message: '服务器响应异常' };
             }
             if (applyResult.status !== 'success') {
                 throw new Error(applyResult.message || '填写分数或提交失败');
@@ -1055,17 +1087,16 @@ document.addEventListener('DOMContentLoaded', function() {
             debugInput.value = '得分: ' + analyzeResult.score + '/' + analyzeResult.max_score;
             debugInput.classList.add('task-completed');
             progressFill.style.width = '100%';
+            progressFill.classList.add('task-completed');
             progressText.textContent = analyzeResult.score + ' / ' + analyzeResult.max_score;
         } catch (error) {
             stopElapsedTimer();
+            if (api.hide_scan_line) api.hide_scan_line();
             restoreMarkers();
-            var hasErrorStep = currentProcessSteps.some(function(step) { return step.status === 'error'; });
-            if (!hasErrorStep) {
-                updateProcessStep('model_call', 'error', '批改流程失败：' + error.message);
-            }
             showGradingResult({ status: 'error', message: '批改流程失败：' + error.message });
             debugInput.value = '批改流程失败: ' + error.message;
             progressFill.style.width = '0%';
+            progressFill.classList.remove('task-completed');
             progressText.textContent = '错误';
         }
     }

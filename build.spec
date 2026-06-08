@@ -59,6 +59,7 @@ a = Analysis(
         'license',
         'activation_ui',
         'integrity',
+        'grading_prompts',
         'tkinter',
         'queue',
         'flask_cors',

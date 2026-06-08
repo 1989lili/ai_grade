@@ -39,8 +39,8 @@ MARKER_LABELS = {
 
 MARKER_SIZES = {
     'card':   (400, 300),
-    'score':  (300, 175),
-    'submit': (300, 175),
+    'score':  (150, 88),
+    'submit': (150, 88),
 }
 
 # ---------- 标记线程通信 ----------
@@ -258,7 +258,7 @@ class TkMarker:
 
 
 class TkScanLine:
-    """答题卡区域扫描线动画。只显示一条横线，扫完自动隐藏。"""
+    """答题卡区域扫描线动画。支持单次扫描和循环扫描两种模式。"""
 
     def __init__(self, root):
         import tkinter as tk
@@ -270,8 +270,10 @@ class TkScanLine:
         self._win.configure(bg='#00f2fe')
         self._win.withdraw()
         self._job = None
+        self._looping = False
 
     def start(self, x, y, w, h, duration_ms=900):
+        """单次扫描，扫完自动隐藏。"""
         self.hide()
         x, y, w, h = int(x), int(y), int(w), int(h)
         duration_ms = max(200, int(duration_ms))
@@ -294,6 +296,32 @@ class TkScanLine:
 
         draw()
 
+    def start_loop(self, x, y, w, h, duration_ms=800):
+        """循环扫描，直到调用 hide() 才停止。"""
+        self.hide()
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        duration_ms = max(200, int(duration_ms))
+        line_h = 4
+        frames = max(12, duration_ms // 16)
+        self._looping = True
+        step = 0
+
+        def draw():
+            nonlocal step
+            if not self._looping:
+                return
+            if step > frames:
+                step = 0  # 回到顶部继续循环
+            ratio = step / frames
+            line_y = y + int(max(0, h - line_h) * ratio)
+            self._win.geometry(f'{max(1, w)}x{line_h}+{x}+{line_y}')
+            self._win.deiconify()
+            self._win.lift()
+            step += 1
+            self._job = self._root.after(max(1, duration_ms // frames), draw)
+
+        draw()
+
     def hide(self):
         if self._job:
             try:
@@ -301,6 +329,7 @@ class TkScanLine:
             except Exception:
                 pass
             self._job = None
+        self._looping = False
         self._win.withdraw()
 
     def destroy(self):
@@ -342,6 +371,11 @@ def _tk_marker_main(markers_out, ready_event):
                     scan_line = markers_out.get('_scan_line')
                     if scan_line:
                         scan_line.start(x, y, w, h, duration_ms)
+                elif action == 'scan_card_loop':
+                    _, x, y, w, h, duration_ms = cmd
+                    scan_line = markers_out.get('_scan_line')
+                    if scan_line:
+                        scan_line.start_loop(x, y, w, h, duration_ms)
                 elif action == 'hide_scan':
                     scan_line = markers_out.get('_scan_line')
                     if scan_line:
@@ -366,6 +400,26 @@ def _tk_marker_main(markers_out, ready_event):
 
 # ---------- 单实例控制 ----------
 
+def set_window_topmost(hwnd):
+    try:
+        HWND_TOPMOST = -1
+        SWP_NOSIZE = 0x0001
+        SWP_NOMOVE = 0x0002
+        SWP_NOACTIVATE = 0x0010
+        SWP_SHOWWINDOW = 0x0040
+        ctypes.windll.user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+    except Exception:
+        pass
+
+
 def ensure_single_instance():
     mutex_name = "Local\\AI_Grader_9a3f2d71-e184-4e6e-bc28-8c5a1f6e9d4b"
     ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
@@ -373,6 +427,7 @@ def ensure_single_instance():
         hwnd = ctypes.windll.user32.FindWindowW(None, "好帮手AI阅卷 1.0.0")
         if hwnd:
             ctypes.windll.user32.ShowWindow(hwnd, 9)
+            set_window_topmost(hwnd)
             ctypes.windll.user32.SetForegroundWindow(hwnd)
         sys.exit(0)
 
@@ -500,6 +555,10 @@ class WindowApi:
     def scan_card_area(self, x, y, w, h, duration_ms=900):
         _marker_queue.put(('scan_card', int(x), int(y), int(w), int(h), int(duration_ms)))
 
+    def scan_card_area_loop(self, x, y, w, h, duration_ms=800):
+        """开始循环扫描答题卡区域，直到调用 hide_scan_line() 停止。"""
+        _marker_queue.put(('scan_card_loop', int(x), int(y), int(w), int(h), int(duration_ms)))
+
     def hide_scan_line(self):
         _marker_queue.put(('hide_scan',))
 
@@ -537,7 +596,7 @@ def main():
     from app import app
 
     def run_flask():
-        app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
+        app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False, threaded=True)
 
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
@@ -585,6 +644,7 @@ def main():
         resizable=True,
         frameless=True,
         easy_drag=False,
+        on_top=True,
         js_api=api,
     )
 
@@ -596,6 +656,7 @@ def main():
                 hwnd = int(window.native.Handle.ToInt64())
                 if hwnd:
                     hide_from_taskbar(hwnd)
+                    set_window_topmost(hwnd)
                     break
             except Exception:
                 pass
