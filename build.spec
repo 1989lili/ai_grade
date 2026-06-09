@@ -37,6 +37,7 @@ a = Analysis(
         'PIL.Image',
         'PIL.ImageDraw',
         'pyautogui',
+        'pyperclip',
         'pyscreeze',
         'pygetwindow',
         'pymsgbox',

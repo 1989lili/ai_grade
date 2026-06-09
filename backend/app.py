@@ -127,19 +127,30 @@ def capture_screen_base64(x, y, w, h):
 # ---------- 桌面自动化 ----------
 
 def auto_fill_score(x, y, score):
-    """在指定屏幕位置填入分数"""
+    """在指定屏幕位置填入分数——先双击选中，再用剪贴板粘贴（更可靠）"""
     import pyautogui
-    pyautogui.click(int(x), int(y))
+    import pyperclip
+    sx, sy = int(x), int(y)
+    log.info("填分: 准备在 (%d, %d) 填入 %s", sx, sy, score)
+    # 复制分数到剪贴板
+    pyperclip.copy(str(score))
+    # 点击目标位置
+    pyautogui.click(sx, sy)
     pyautogui.sleep(0.3)
+    # 全选并粘贴
     pyautogui.hotkey('ctrl', 'a')
-    pyautogui.sleep(0.1)
-    pyautogui.typewrite(str(score), interval=0.05)
+    pyautogui.sleep(0.15)
+    pyautogui.hotkey('ctrl', 'v')
+    pyautogui.sleep(0.15)
+    log.info("填分: 已粘贴分数 %s", score)
 
 
 def auto_click_submit(x, y):
     """点击提交按钮"""
     import pyautogui
-    pyautogui.click(int(x), int(y))
+    bx, by = int(x), int(y)
+    log.info("提交: 点击 (%d, %d)", bx, by)
+    pyautogui.click(bx, by)
 
 
 # ---------- 多模态 LLM 调用 ----------
@@ -717,12 +728,14 @@ def apply_grading_result(data):
         build_step(steps, 'fill_score', '填写分数', 'error', '未设置打分框位置', fill_started)
         raise GradingError('请先框定打分框位置。', code='missing_score_box', status_code=400, detail={'steps': steps})
 
+    # 写完分数后等待1秒再提交
+    time.sleep(1)
+
     submit_started = time.monotonic()
     if submit_btn:
         try:
             bx = submit_btn['x'] + submit_btn['w'] / 2
             by = submit_btn['y'] + submit_btn['h'] / 2
-            log.info("提交: click (%d, %d)", int(bx), int(by))
             auto_click_submit(bx, by)
             build_step(steps, 'submit', '提交结果', 'success', '已点击提交按钮', submit_started)
         except Exception as exc:

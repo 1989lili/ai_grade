@@ -932,145 +932,187 @@ document.addEventListener('DOMContentLoaded', function() {
         var api = (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
         if (!api) { alert('API 未就绪，请稍候再试'); return; }
 
+        // 检查标记
         var rects = await api.get_all_marker_rects();
         if (!rects || !rects.card || !rects.score || !rects.submit) {
             alert('请先完成所有标记设置（答题卡区域、打分框位置、提交按钮位置）');
             return;
         }
 
+        // 保存评分标准
         var scoringEditor = document.getElementById('scoring-editor');
         if (scoringEditor) { scoringStandards[currentContentTab] = scoringEditor.innerHTML; }
 
         var config = getCurrentProviderConfig();
         if (!config.apiKey) { alert('请先在AI配置页面填写API Key'); return; }
 
+        // 读取改卷参数
+        var totalInput = document.querySelector('.setting-group .setting-item:nth-child(1) input');
+        var completedInput = document.querySelector('.setting-group .setting-item:nth-child(2) input');
+        var total = parseInt(totalInput.value) || 0;
+        var completed = parseInt(completedInput.value) || 0;
+
+        if (completed >= total) {
+            alert('已改数量已达到改卷数量，无需继续批改');
+            return;
+        }
+
         var cardArea = rects.card;
         var scoreBox = rects.score;
         var submitBtn = rects.submit;
-        var markersHidden = false;
 
-        function restoreMarkers() {
-            if (!markersHidden || !api || !api.show_marker_at) return;
-            api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
-            api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
-            api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
-            markersHidden = false;
-        }
-
-        activateMainTab('scoring-process-tab');
-        resetGradingUI();
-        debugInput.value = '正在启动评分流程...';
         debugInput.classList.remove('task-completed');
         progressFill.classList.remove('task-completed');
-        progressFill.style.width = '10%';
-        progressText.textContent = '准备中...';
-        startElapsedTimer();
+        updateProgress();
 
-        // ── 启动持续扫描动画 ──
-        if (api.scan_card_area_loop) {
-            api.scan_card_area_loop(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 800);
-        } else if (api.scan_card_area) {
-            api.scan_card_area(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 900);
-        }
-
-        if (api.hide_all_markers) {
-            api.hide_all_markers();
-            markersHidden = true;
-            await new Promise(function(resolve) { setTimeout(resolve, 150); });
-        }
-
-        try {
-            debugInput.value = '正在调用AI模型识别答题卡...';
-            progressFill.style.width = '25%';
-            progressText.textContent = 'AI评分中...';
-
-            var analyzeResult = null;
-            var streamText = '';
-            var analyzeResponse = await fetch('/api/grade/analyze-stream', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    cardArea: cardArea,
-                    standards: scoringStandards,
-                    provider: config.provider,
-                    apiKey: config.apiKey,
-                    modelName: config.modelName
-                })
-            });
-
-            await readNdjsonStream(analyzeResponse, async function(event) {
-                if (event.type === 'status') {
-                    debugInput.value = event.message || '处理中...';
-                    appendStreamContent('[' + event.message + ']\n');
-                    progressFill.style.width = Math.min(30 + Math.floor((event.elapsed_ms || 0) / 2000), 65) + '%';
-                    return;
-                }
-
-                if (event.type === 'token') {
-                    appendStreamContent(event.content || '');
-                    debugInput.value = 'AI评分内容接收中...';
-                    progressFill.style.width = Math.min(30 + Math.floor(streamText.length / 25), 70) + '%';
-                    return;
-                }
-
-                if (event.type === 'final') {
-                    analyzeResult = event.result;
-                    progressFill.style.width = '75%';
-                    progressText.textContent = '评分完成';
-                    return;
-                }
-
-                if (event.type === 'error') {
-                    throw new Error(event.message || '答题卡识别或评分失败');
-                }
-            });
-
-            if (!analyzeResult || analyzeResult.status !== 'success') {
-                throw new Error((analyzeResult && analyzeResult.message) || '答题卡识别或评分失败');
+        // ── 循环批改，直到完成 ──
+        while (true) {
+            total = parseInt(totalInput.value) || 0;
+            completed = parseInt(completedInput.value) || 0;
+            if (completed >= total) {
+                debugInput.value = '全部批改完成！共 ' + total + ' 份';
+                debugInput.classList.add('task-completed');
+                progressFill.classList.add('task-completed');
+                updateProgress();
+                break;
             }
 
-            if (api.hide_scan_line) api.hide_scan_line();
+            // 刷新标记位置（用户可能调整过）
+            rects = await api.get_all_marker_rects();
+            if (!rects || !rects.card || !rects.score || !rects.submit) {
+                debugInput.value = '标记丢失，停止批改';
+                break;
+            }
+            cardArea = rects.card;
+            scoreBox = rects.score;
+            submitBtn = rects.submit;
+            var markersHidden = false;
 
-            debugInput.value = '正在填写分数并提交...';
-            progressFill.style.width = '80%';
-            progressText.textContent = '填写提交中...';
+            activateMainTab('scoring-process-tab');
+            resetGradingUI();
+            appendStreamContent('=== 第 ' + (completed + 1) + ' / ' + total + ' 份 ===\n');
+            debugInput.value = '正在批改第 ' + (completed + 1) + ' 份...';
+            startElapsedTimer();
 
-            var applyResponse = await fetch('/api/grade/apply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    score: analyzeResult.score,
-                    scoreBox: scoreBox,
-                    submitBtn: submitBtn
-                })
-            });
-            var applyResult;
+            // 启动扫描动画
+            if (api.scan_card_area_loop) {
+                api.scan_card_area_loop(cardArea.x, cardArea.y, cardArea.w, cardArea.h, 800);
+            }
+
+            // 隐藏标记
+            if (api.hide_all_markers) {
+                api.hide_all_markers();
+                markersHidden = true;
+                await new Promise(function(resolve) { setTimeout(resolve, 150); });
+            }
+
             try {
-                applyResult = await applyResponse.json();
-            } catch (e) {
-                applyResult = { status: 'error', message: '服务器响应异常' };
-            }
-            if (applyResult.status !== 'success') {
-                throw new Error(applyResult.message || '填写分数或提交失败');
-            }
+                // ── 调AI评分（流式） ──
+                var analyzeResult = null;
+                var analyzeResponse = await fetch('/api/grade/analyze-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        cardArea: cardArea,
+                        standards: scoringStandards,
+                        provider: config.provider,
+                        apiKey: config.apiKey,
+                        modelName: config.modelName
+                    })
+                });
 
-            stopElapsedTimer();
-            restoreMarkers();
-            showGradingResult(analyzeResult);
-            debugInput.value = '得分: ' + analyzeResult.score + '/' + analyzeResult.max_score;
-            debugInput.classList.add('task-completed');
-            progressFill.style.width = '100%';
-            progressFill.classList.add('task-completed');
-            progressText.textContent = analyzeResult.score + ' / ' + analyzeResult.max_score;
-        } catch (error) {
-            stopElapsedTimer();
-            if (api.hide_scan_line) api.hide_scan_line();
-            restoreMarkers();
-            showGradingResult({ status: 'error', message: '批改流程失败：' + error.message });
-            debugInput.value = '批改流程失败: ' + error.message;
-            progressFill.style.width = '0%';
-            progressFill.classList.remove('task-completed');
-            progressText.textContent = '错误';
+                await readNdjsonStream(analyzeResponse, async function(event) {
+                    if (event.type === 'status') {
+                        debugInput.value = event.message || '处理中...';
+                        appendStreamContent('[' + event.message + ']\n');
+                        return;
+                    }
+                    if (event.type === 'token') {
+                        appendStreamContent(event.content || '');
+                        debugInput.value = 'AI评分内容接收中...';
+                        return;
+                    }
+                    if (event.type === 'final') {
+                        analyzeResult = event.result;
+                        return;
+                    }
+                    if (event.type === 'error') {
+                        throw new Error(event.message || '评分失败');
+                    }
+                });
+
+                if (!analyzeResult || analyzeResult.status !== 'success') {
+                    throw new Error((analyzeResult && analyzeResult.message) || '评分失败');
+                }
+
+                if (api.hide_scan_line) api.hide_scan_line();
+                appendStreamContent('\n--- 评分完成，正在填写提交 ---\n');
+
+                // ── 填写分数并提交 ──
+                var applyResponse = await fetch('/api/grade/apply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        score: analyzeResult.score,
+                        scoreBox: scoreBox,
+                        submitBtn: submitBtn
+                    })
+                });
+                var applyResult;
+                try {
+                    applyResult = await applyResponse.json();
+                } catch (e) {
+                    applyResult = { status: 'error', message: '服务器响应异常' };
+                }
+                if (applyResult.status !== 'success') {
+                    throw new Error(applyResult.message || '填写分数或提交失败');
+                }
+
+                stopElapsedTimer();
+
+                // ── 更新已改数量 ──
+                completed = completed + 1;
+                completedInput.value = completed;
+                updateProgress();
+                appendStreamContent('得分: ' + analyzeResult.score + '/' + analyzeResult.max_score + '\n');
+
+                // 恢复标记
+                if (markersHidden && api && api.show_marker_at) {
+                    api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
+                    api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
+                    api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
+                    markersHidden = false;
+                }
+
+                showGradingResult(analyzeResult);
+                debugInput.value = '第 ' + completed + '/' + total + ' 份完成，得分: ' + analyzeResult.score;
+
+                if (completed >= total) {
+                    debugInput.value = '全部批改完成！共 ' + total + ' 份';
+                    debugInput.classList.add('task-completed');
+                    progressFill.classList.add('task-completed');
+                    updateProgress();
+                    break;
+                }
+
+                // 等待2秒后自动开始下一份
+                appendStreamContent('\n⏳ 2秒后自动批改下一份...\n');
+                await new Promise(function(resolve) { setTimeout(resolve, 2000); });
+
+            } catch (error) {
+                stopElapsedTimer();
+                if (api.hide_scan_line) api.hide_scan_line();
+                // 恢复标记
+                if (markersHidden && api && api.show_marker_at) {
+                    api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
+                    api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
+                    api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
+                }
+                appendStreamContent('\n[错误] ' + error.message + '\n');
+                showGradingResult({ status: 'error', message: error.message });
+                debugInput.value = '批改出错: ' + error.message;
+                break;
+            }
         }
     }
 
