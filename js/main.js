@@ -963,6 +963,9 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
+        setGradingButtons(true);
+        gradingAbortController = new AbortController();
+
         var cardArea = rects.card;
         var scoreBox = rects.score;
         var submitBtn = rects.submit;
@@ -973,6 +976,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // ── 循环批改，直到完成 ──
         while (true) {
+            // 检查是否被用户停止
+            if (gradingAbortController && gradingAbortController.signal.aborted) {
+                appendStreamContent('\n[已停止] 用户手动停止批改\n');
+                debugInput.value = '批改已停止';
+                break;
+            }
+
             total = parseInt(totalInput.value) || 0;
             completed = parseInt(completedInput.value) || 0;
             if (completed >= total) {
@@ -1015,9 +1025,12 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 // ── 调AI评分（流式） ──
                 var analyzeResult = null;
+                // 每个请求前创建新的 AbortController
+                gradingAbortController = new AbortController();
                 var analyzeResponse = await fetch('/api/grade/analyze-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    signal: gradingAbortController.signal,
                     body: JSON.stringify({
                         cardArea: cardArea,
                         standards: scoringStandards,
@@ -1114,16 +1127,60 @@ document.addEventListener('DOMContentLoaded', function() {
                     api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
                     api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
                 }
-                appendStreamContent('\n[错误] ' + error.message + '\n');
-                showGradingResult({ status: 'error', message: error.message });
-                debugInput.value = '批改出错: ' + error.message;
+                // AbortError 是用户手动停止，不算错误
+                if (error.name === 'AbortError') {
+                    appendStreamContent('\n[已停止] 批改已取消\n');
+                    debugInput.value = '批改已停止';
+                } else {
+                    appendStreamContent('\n[错误] ' + error.message + '\n');
+                    showGradingResult({ status: 'error', message: error.message });
+                    debugInput.value = '批改出错: ' + error.message;
+                }
                 break;
             }
         }
+
+        setGradingButtons(false);
+        gradingAbortController = null;
     }
 
-    var correctBtn = document.querySelector('.action-btn.correct');
-    if (correctBtn) { correctBtn.addEventListener('click', startGrading); }
+    var correctBtn = document.getElementById('correct-btn');
+    var stopBtn = document.getElementById('stop-btn');
+    var gradingAbortController = null;
+    var gradingActive = false;
+
+    function setGradingButtons(grading) {
+        gradingActive = grading;
+        if (correctBtn) {
+            correctBtn.disabled = grading;
+        }
+        if (stopBtn) {
+            stopBtn.disabled = !grading;
+        }
+    }
+
+    if (correctBtn) {
+        correctBtn.addEventListener('click', function() {
+            if (correctBtn.disabled) return;
+            // 防抖：3秒内不能重复点击
+            correctBtn.disabled = true;
+            setTimeout(function() {
+                if (!gradingActive) correctBtn.disabled = false;
+            }, 3000);
+            startGrading();
+        });
+    }
+
+    if (stopBtn) {
+        stopBtn.addEventListener('click', function() {
+            if (stopBtn.disabled) return;
+            setStatusLine('正在停止...');
+            if (gradingAbortController) {
+                gradingAbortController.abort();
+                gradingAbortController = null;
+            }
+        });
+    }
 
     markingBtns.forEach(function(btn) {
         btn.addEventListener('click', function() {

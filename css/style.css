@@ -1141,9 +1141,17 @@
         .correct {
             background-color: #28a745;
         }
+        .correct:disabled {
+            background-color: #93c9a0;
+            cursor: not-allowed;
+        }
         
-        .debug {
-            background-color: #ff9800;
+        .stop {
+            background-color: #f44336;
+        }
+        .stop:disabled {
+            background-color: #e8a0a0;
+            cursor: not-allowed;
         }
         
         .record {

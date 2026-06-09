@@ -126,22 +126,29 @@ def capture_screen_base64(x, y, w, h):
 
 # ---------- 桌面自动化 ----------
 
+HUMAN_CLICK_DELAY = 2   # 每个点击步骤前等待 2 秒，模拟人类操作
+HUMAN_SCORE_PAUSE = 3  # 写完分数后停顿 3 秒
+
+
 def auto_fill_score(x, y, score):
-    """在指定屏幕位置填入分数——先双击选中，再用剪贴板粘贴（更可靠）"""
+    """在指定屏幕位置填入分数——模拟人类操作，每步之间有停顿"""
     import pyautogui
     import pyperclip
     sx, sy = int(x), int(y)
     log.info("填分: 准备在 (%d, %d) 填入 %s", sx, sy, score)
-    # 复制分数到剪贴板
     pyperclip.copy(str(score))
     # 点击目标位置
+    time.sleep(HUMAN_CLICK_DELAY)
     pyautogui.click(sx, sy)
-    pyautogui.sleep(0.3)
-    # 全选并粘贴
+    pyautogui.sleep(0.5)
+    # 全选
+    time.sleep(HUMAN_CLICK_DELAY)
     pyautogui.hotkey('ctrl', 'a')
-    pyautogui.sleep(0.15)
+    pyautogui.sleep(0.3)
+    # 粘贴
+    time.sleep(HUMAN_CLICK_DELAY)
     pyautogui.hotkey('ctrl', 'v')
-    pyautogui.sleep(0.15)
+    pyautogui.sleep(0.3)
     log.info("填分: 已粘贴分数 %s", score)
 
 
@@ -149,8 +156,10 @@ def auto_click_submit(x, y):
     """点击提交按钮"""
     import pyautogui
     bx, by = int(x), int(y)
-    log.info("提交: 点击 (%d, %d)", bx, by)
+    log.info("提交: 等待 %d 秒后点击 (%d, %d)", HUMAN_CLICK_DELAY, bx, by)
+    time.sleep(HUMAN_CLICK_DELAY)
     pyautogui.click(bx, by)
+    log.info("提交: 已点击")
 
 
 # ---------- 多模态 LLM 调用 ----------
@@ -728,8 +737,9 @@ def apply_grading_result(data):
         build_step(steps, 'fill_score', '填写分数', 'error', '未设置打分框位置', fill_started)
         raise GradingError('请先框定打分框位置。', code='missing_score_box', status_code=400, detail={'steps': steps})
 
-    # 写完分数后等待1秒再提交
-    time.sleep(1)
+    # 写完分数后停顿，模拟人确认分数
+    log.info("填分完成，等待 %d 秒后提交...", HUMAN_SCORE_PAUSE)
+    time.sleep(HUMAN_SCORE_PAUSE)
 
     submit_started = time.monotonic()
     if submit_btn:
