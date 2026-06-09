@@ -845,6 +845,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function resetGradingUI() {
         stopElapsedTimer();
         setElapsedText('未开始');
+        setStatusLine('');
         var resultBox = document.getElementById('grading-result');
         if (resultBox) {
             resultBox.classList.remove('active');
@@ -855,6 +856,11 @@ document.addEventListener('DOMContentLoaded', function() {
             streamBox.textContent = '';
             streamBox.scrollTop = 0;
         }
+    }
+
+    function setStatusLine(text) {
+        var line = document.getElementById('grading-status-line');
+        if (line) line.textContent = text;
     }
 
     function appendStreamContent(text) {
@@ -1023,8 +1029,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 await readNdjsonStream(analyzeResponse, async function(event) {
                     if (event.type === 'status') {
+                        setStatusLine(event.message || '处理中...');
                         debugInput.value = event.message || '处理中...';
-                        appendStreamContent('[' + event.message + ']\n');
                         return;
                     }
                     if (event.type === 'token') {
