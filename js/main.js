@@ -850,44 +850,18 @@ document.addEventListener('DOMContentLoaded', function() {
             resultBox.classList.remove('active');
             resultBox.textContent = '';
         }
-        hideStreamContent();
-    }
-
-    function setupStreamContentArea() {
-        var panel = document.querySelector('#scoring-process-tab .process-panel');
-        if (!panel) return;
-        var existing = document.getElementById('grading-stream-content');
-        if (!existing) {
-            var div = document.createElement('div');
-            div.id = 'grading-stream-content';
-            div.className = 'stream-content';
-            div.style.cssText = 'display:none;margin:8px 0;padding:14px 16px;background:rgba(0,0,0,0.02);border-radius:8px;flex:1;overflow-y:auto;font-size:14px;line-height:1.8;white-space:pre-wrap;word-break:break-word;border:1px solid rgba(0,0,0,0.06);min-height:200px;';
-            var header = document.querySelector('#scoring-process-tab .process-header');
-            if (header && header.parentNode) {
-                header.parentNode.insertBefore(div, header.nextSibling);
-            } else {
-                panel.insertBefore(div, panel.firstChild);
-            }
+        var streamBox = document.getElementById('grading-stream-content');
+        if (streamBox) {
+            streamBox.textContent = '';
+            streamBox.scrollTop = 0;
         }
     }
 
-    function showStreamContent(text) {
+    function appendStreamContent(text) {
         var box = document.getElementById('grading-stream-content');
-        if (!box) { setupStreamContentArea(); box = document.getElementById('grading-stream-content'); }
         if (!box) return;
-        // 隐藏占位提示
-        var placeholder = document.getElementById('grading-stream-placeholder');
-        if (placeholder) placeholder.style.display = 'none';
-        box.style.display = 'block';
-        box.textContent = text;
+        box.textContent += text;
         box.scrollTop = box.scrollHeight;
-    }
-
-    function hideStreamContent() {
-        var box = document.getElementById('grading-stream-content');
-        if (box) box.style.display = 'none';
-        var placeholder = document.getElementById('grading-stream-placeholder');
-        if (placeholder) placeholder.style.display = '';
     }
 
     function showGradingResult(result) {
@@ -985,7 +959,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         activateMainTab('scoring-process-tab');
         resetGradingUI();
-        setupStreamContentArea();
         debugInput.value = '正在启动评分流程...';
         debugInput.classList.remove('task-completed');
         progressFill.classList.remove('task-completed');
@@ -1028,13 +1001,13 @@ document.addEventListener('DOMContentLoaded', function() {
             await readNdjsonStream(analyzeResponse, async function(event) {
                 if (event.type === 'status') {
                     debugInput.value = event.message || '处理中...';
+                    appendStreamContent('[' + event.message + ']\n');
                     progressFill.style.width = Math.min(30 + Math.floor((event.elapsed_ms || 0) / 2000), 65) + '%';
                     return;
                 }
 
                 if (event.type === 'token') {
-                    streamText += event.content || '';
-                    showStreamContent(streamText);
+                    appendStreamContent(event.content || '');
                     debugInput.value = 'AI评分内容接收中...';
                     progressFill.style.width = Math.min(30 + Math.floor(streamText.length / 25), 70) + '%';
                     return;
