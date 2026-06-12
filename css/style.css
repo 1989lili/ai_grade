@@ -1146,6 +1146,14 @@
             cursor: not-allowed;
         }
         
+        .pause {
+            background-color: #ff9800;
+        }
+        .pause:disabled {
+            background-color: #f3c37c;
+            cursor: not-allowed;
+        }
+
         .stop {
             background-color: #f44336;
         }
@@ -1153,7 +1161,7 @@
             background-color: #e8a0a0;
             cursor: not-allowed;
         }
-        
+
         .record {
             background-color: #9c27b0;
             margin-left: auto;
@@ -1250,14 +1258,14 @@
             border: 3px solid #e91e63;
         }
         .html-marker[data-mtype="score"] {
-            width: 300px;
-            height: 175px;
+            width: 450px;
+            height: 105px;
             background: transparent;
             border: 3px solid #2196f3;
         }
         .html-marker[data-mtype="submit"] {
-            width: 300px;
-            height: 175px;
+            width: 450px;
+            height: 105px;
             background: transparent;
             border: 3px solid #9c27b0;
         }

@@ -39,9 +39,11 @@ MARKER_LABELS = {
 
 MARKER_SIZES = {
     'card':   (400, 300),
-    'score':  (150, 88),
-    'submit': (150, 88),
+    'score':  (225, 53),
+    'submit': (225, 53),
 }
+
+MARKER_ORDER = ('card', 'score', 'submit')
 
 # ---------- 标记线程通信 ----------
 
@@ -527,18 +529,26 @@ class WindowApi:
 
         sw, sh = MARKER_SIZES[mtype]
         gap = 20
+        max_w = max(MARKER_SIZES[mt][0] for mt in MARKER_ORDER)
+        stack_h = sum(MARKER_SIZES[mt][1] for mt in MARKER_ORDER) + gap * (len(MARKER_ORDER) - 1)
 
-        if main_x + main_w + gap + sw <= screen_w:
+        if main_x + main_w + gap + max_w <= screen_w:
             x = main_x + main_w + gap
-        elif main_x - gap - sw >= 0:
-            x = main_x - gap - sw
+        elif main_x - gap - max_w >= 0:
+            x = main_x - gap - max_w
         else:
-            x = screen_w - sw - gap
+            x = screen_w - max_w - gap
 
-        y = main_y
-        if y + sh > screen_h:
-            y = screen_h - sh - gap
-        y = max(0, y)
+        base_y = main_y
+        if base_y + stack_h > screen_h:
+            base_y = screen_h - stack_h - gap
+        base_y = max(0, base_y)
+
+        y = base_y
+        for mt in MARKER_ORDER:
+            if mt == mtype:
+                break
+            y += MARKER_SIZES[mt][1] + gap
 
         _marker_queue.put(('show', mtype, x, y, sw, sh))
 

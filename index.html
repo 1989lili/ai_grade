@@ -105,9 +105,9 @@
                             <div class="config-item">
                                 <label for="model-name-deepseek">模型名称:</label>
                                 <select id="model-name-deepseek" class="model-select">
-                                    <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-                                    <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                                    <option value="deepseek-v4-flash">deepseek-v4-flash（速度优先）</option>
                                     <option value="deepseek-chat">deepseek-chat</option>
+                                    <option value="deepseek-v4-pro">deepseek-v4-pro（质量优先）</option>
                                 </select>
                             </div>
                         </div>
@@ -378,6 +378,7 @@
         <div class="footer">
             <div class="footer-top">
                 <button class="action-btn correct" id="correct-btn">批改</button>
+                <button class="action-btn pause" id="pause-btn" disabled>暂停</button>
                 <button class="action-btn stop" id="stop-btn" disabled>停止</button>
                 <div class="debug-info">
                     <input type="text" value="提示信息" readonly>

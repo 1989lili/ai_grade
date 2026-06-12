@@ -771,13 +771,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (elapsed) elapsed.textContent = text;
     }
 
-    function startElapsedTimer() {
+    function startElapsedTimer(prefix) {
         stopElapsedTimer();
         gradingStartedAt = Date.now();
-        setElapsedText('用时 00:00');
+        prefix = prefix || '用时 ';
+        setElapsedText(prefix + '00:00');
         gradingTimer = setInterval(function() {
             var seconds = Math.floor((Date.now() - gradingStartedAt) / 1000);
-            setElapsedText('用时 ' + formatElapsed(seconds));
+            setElapsedText(prefix + formatElapsed(seconds));
         }, 1000);
     }
 
@@ -856,6 +857,13 @@ document.addEventListener('DOMContentLoaded', function() {
             streamBox.textContent = '';
             streamBox.scrollTop = 0;
         }
+    }
+
+    function resetGradingProgress() {
+        var completedInput = document.querySelector('.setting-group .setting-item:nth-child(2) input');
+        if (completedInput) completedInput.value = 0;
+        updateProgress();
+        resetGradingUI();
     }
 
     function setStatusLine(text) {
@@ -963,6 +971,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
+        gradingPaused = false;
+        gradingStopped = false;
         setGradingButtons(true);
         gradingAbortController = new AbortController();
 
@@ -976,10 +986,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // ── 循环批改，直到完成 ──
         while (true) {
-            // 检查是否被用户停止
-            if (gradingAbortController && gradingAbortController.signal.aborted) {
-                appendStreamContent('\n[已停止] 用户手动停止批改\n');
-                debugInput.value = '批改已停止';
+            if (gradingStopped) {
+                resetGradingProgress();
+                debugInput.value = '批改已停止，进度已重置';
+                break;
+            }
+
+            while (gradingPaused && !gradingStopped) {
+                setStatusLine('已暂停，点击继续恢复批改');
+                debugInput.value = '批改已暂停';
+                await new Promise(function(resolve) { setTimeout(resolve, 200); });
+            }
+            if (gradingStopped) {
+                resetGradingProgress();
+                debugInput.value = '批改已停止，进度已重置';
                 break;
             }
 
@@ -1008,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', function() {
             resetGradingUI();
             appendStreamContent('=== 第 ' + (completed + 1) + ' / ' + total + ' 份 ===\n');
             debugInput.value = '正在批改第 ' + (completed + 1) + ' 份...';
-            startElapsedTimer();
+            startElapsedTimer('倒计时 ');
 
             // 启动扫描动画
             if (api.scan_card_area_loop) {
@@ -1025,6 +1045,8 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 // ── 调AI评分（流式） ──
                 var analyzeResult = null;
+                var reasoningStarted = false;
+                var partialScoreShown = false;
                 // 每个请求前创建新的 AbortController
                 gradingAbortController = new AbortController();
                 var analyzeResponse = await fetch('/api/grade/analyze-stream', {
@@ -1042,13 +1064,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 await readNdjsonStream(analyzeResponse, async function(event) {
                     if (event.type === 'status') {
-                        setStatusLine(event.message || '处理中...');
-                        debugInput.value = event.message || '处理中...';
+                        var statusMessage = event.message || '处理中...';
+                        setStatusLine(statusMessage);
+                        debugInput.value = statusMessage;
+                        return;
+                    }
+                    if (event.type === 'reasoning') {
+                        if (!reasoningStarted) {
+                            setStatusLine('模型正在分析答题卡...');
+                            reasoningStarted = true;
+                        }
+                        debugInput.value = 'AI正在分析答题卡...';
                         return;
                     }
                     if (event.type === 'token') {
                         appendStreamContent(event.content || '');
                         debugInput.value = 'AI评分内容接收中...';
+                        return;
+                    }
+                    if (event.type === 'partial_score') {
+                        if (!partialScoreShown) {
+                            appendStreamContent('\n[初步得分] ' + event.score + ' / ' + event.max_score + '\n');
+                            partialScoreShown = true;
+                        }
                         return;
                     }
                     if (event.type === 'final') {
@@ -1114,9 +1152,23 @@ document.addEventListener('DOMContentLoaded', function() {
                     break;
                 }
 
-                // 等待2秒后自动开始下一份
+                // 等待2秒后自动开始下一份，期间允许暂停或停止
                 appendStreamContent('\n⏳ 2秒后自动批改下一份...\n');
-                await new Promise(function(resolve) { setTimeout(resolve, 2000); });
+                var waitUntil = Date.now() + 2000;
+                while (Date.now() < waitUntil && !gradingStopped) {
+                    if (gradingPaused) {
+                        setStatusLine('已暂停，点击继续恢复批改');
+                        debugInput.value = '批改已暂停';
+                        await new Promise(function(resolve) { setTimeout(resolve, 200); });
+                        continue;
+                    }
+                    await new Promise(function(resolve) { setTimeout(resolve, 100); });
+                }
+                if (gradingStopped) {
+                    resetGradingProgress();
+                    debugInput.value = '批改已停止，进度已重置';
+                    break;
+                }
 
             } catch (error) {
                 stopElapsedTimer();
@@ -1129,8 +1181,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 // AbortError 是用户手动停止，不算错误
                 if (error.name === 'AbortError') {
-                    appendStreamContent('\n[已停止] 批改已取消\n');
-                    debugInput.value = '批改已停止';
+                    if (gradingStopped) {
+                        resetGradingProgress();
+                        debugInput.value = '批改已停止，进度已重置';
+                    } else {
+                        debugInput.value = '批改已取消';
+                    }
                 } else {
                     appendStreamContent('\n[错误] ' + error.message + '\n');
                     showGradingResult({ status: 'error', message: error.message });
@@ -1140,19 +1196,28 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
+        gradingPaused = false;
+        gradingStopped = false;
         setGradingButtons(false);
         gradingAbortController = null;
     }
 
     var correctBtn = document.getElementById('correct-btn');
+    var pauseBtn = document.getElementById('pause-btn');
     var stopBtn = document.getElementById('stop-btn');
     var gradingAbortController = null;
     var gradingActive = false;
+    var gradingPaused = false;
+    var gradingStopped = false;
 
     function setGradingButtons(grading) {
         gradingActive = grading;
         if (correctBtn) {
             correctBtn.disabled = grading;
+        }
+        if (pauseBtn) {
+            pauseBtn.disabled = !grading;
+            pauseBtn.textContent = gradingPaused ? '继续' : '暂停';
         }
         if (stopBtn) {
             stopBtn.disabled = !grading;
@@ -1171,13 +1236,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    if (pauseBtn) {
+        pauseBtn.addEventListener('click', function() {
+            if (pauseBtn.disabled) return;
+            gradingPaused = !gradingPaused;
+            pauseBtn.textContent = gradingPaused ? '继续' : '暂停';
+            setStatusLine(gradingPaused ? '已暂停，点击继续恢复批改' : '继续批改中...');
+            var debugInput = document.querySelector('.debug-info input');
+            if (debugInput) debugInput.value = gradingPaused ? '批改已暂停' : '继续批改中...';
+        });
+    }
+
     if (stopBtn) {
         stopBtn.addEventListener('click', function() {
             if (stopBtn.disabled) return;
-            setStatusLine('正在停止...');
+            gradingStopped = true;
+            gradingPaused = false;
+            setStatusLine('正在停止并重置进度...');
             if (gradingAbortController) {
                 gradingAbortController.abort();
                 gradingAbortController = null;
+            } else {
+                resetGradingProgress();
+                setGradingButtons(false);
             }
         });
     }

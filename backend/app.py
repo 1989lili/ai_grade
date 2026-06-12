@@ -168,7 +168,8 @@ LLM_CONNECT_TIMEOUT = 10
 LLM_READ_TIMEOUT = 180
 LLM_MAX_RETRIES = 1
 LLM_RETRY_BACKOFF_SECONDS = 2
-LLM_MAX_TOKENS = 2048
+LLM_MAX_TOKENS = 1024
+LLM_STREAM_MAX_TOKENS = 512
 
 
 class GradingError(Exception):
@@ -225,9 +226,9 @@ def build_grading_messages(image_base64, standards, streaming=False):
 
     if streaming:
         text_parts.append(
-            "请先输出学生作答内容和阅卷评析（自然语言即可），"
-            "最后一行输出一个可解析的 JSON：\n"
-            "{\"student_answer\":\"<作答>\",\"review_analysis\":\"<评析>\",\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<依据>\"}"
+            "请快速评分。开头必须直接输出：得分：<score>/<max_score>，简评：<一句话>。"
+            "不要输出铺垫语、思考过程或 Markdown。最后一行输出一个可解析的 JSON：\n"
+            "{\"student_answer\":\"<简短作答>\",\"review_analysis\":\"<1-2句>\",\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<一句话依据>\"}"
         )
     else:
         text_parts.append(
@@ -270,7 +271,7 @@ def make_grading_payload(model_name, image_base64, standards, streaming=False):
         "model": model_name,
         "messages": build_grading_messages(image_base64, standards, streaming=streaming),
         "temperature": 0.3,
-        "max_tokens": LLM_MAX_TOKENS
+        "max_tokens": LLM_STREAM_MAX_TOKENS if streaming else LLM_MAX_TOKENS
     }
     if streaming:
         payload["stream"] = True
@@ -423,6 +424,10 @@ def stream_llm_for_grading(provider, api_key, model_name, image_base64, standard
                     continue
                 delta = choices[0].get('delta') or {}
                 content = delta.get('content') or ''
+                reasoning_content = delta.get('reasoning_content') or delta.get('reasoning') or ''
+                if reasoning_content:
+                    emitted_token = True
+                    out_queue.put({'type': 'reasoning', 'content': reasoning_content})
                 if content:
                     emitted_token = True
                     content_parts.append(content)
@@ -557,6 +562,23 @@ def parse_score(response_text):
                 'student_answer': '', 'review_analysis': ''}
 
     raise ValueError(f"无法从响应中解析分数: {text[:200]}")
+
+
+def extract_partial_score(text):
+    """从流式片段中尽早提取得分，仅用于前端展示。"""
+    if not text:
+        return None
+
+    cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)', text)
+    if cn_match:
+        return {'score': float(cn_match.group(1)), 'max_score': float(cn_match.group(2))}
+
+    score_match = re.search(r'"score"\s*:\s*(\d+(?:\.\d+)?)', text)
+    max_match = re.search(r'"max_score"\s*:\s*(\d+(?:\.\d+)?)', text)
+    if score_match and max_match:
+        return {'score': float(score_match.group(1)), 'max_score': float(max_match.group(1))}
+
+    return None
 
 
 # ---------- API 端点 ----------
@@ -790,6 +812,8 @@ def stream_analyze_card_grading(data):
         yield ndjson_event('error', code='missing_card_area', message='请先框定答题卡区域')
         return
 
+    yield ndjson_event('status', message='已收到评分请求，正在准备截图...')
+
     # ── 截图 ──
     yield ndjson_event('status', message='正在截取答题卡区域...')
     try:
@@ -811,9 +835,11 @@ def stream_analyze_card_grading(data):
         daemon=True
     )
     worker.start()
+    yield ndjson_event('status', message='AI请求已发起，等待模型首段输出...', elapsed_ms=0)
 
     full_text = ''
     llm_meta = {}
+    partial_score_sent = False
     while True:
         try:
             item = model_queue.get(timeout=1)
@@ -832,6 +858,13 @@ def stream_analyze_card_grading(data):
             token_content = item.get('content', '')
             full_text += token_content
             yield ndjson_event('token', content=token_content)
+            if not partial_score_sent:
+                partial_score = extract_partial_score(full_text)
+                if partial_score:
+                    partial_score_sent = True
+                    yield ndjson_event('partial_score', **partial_score)
+        elif item_type == 'reasoning':
+            yield ndjson_event('reasoning', content=item.get('content', ''))
         elif item_type == 'done':
             full_text = item.get('content', '')
             llm_meta = item
