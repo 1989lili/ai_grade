@@ -428,7 +428,6 @@ document.addEventListener('DOMContentLoaded', function() {
             
             const progressFill = document.querySelector('.progress-fill');
             const progressText = document.querySelector('.progress-text');
-            const debugInput = document.querySelector('.debug-info input');
             const footer = document.querySelector('.footer');
             const progressBar = document.querySelector('.progress-bar');
             
@@ -439,13 +438,9 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 检查任务是否完成
             const isCompleted = total > 0 && completed >= total;
-            
+
             // 应用任务完成样式
             if (isCompleted) {
-                if (debugInput) {
-                    debugInput.value = '任务完成!';
-                    debugInput.classList.add('task-completed');
-                }
                 if (footer) {
                     footer.classList.add('task-completed');
                 }
@@ -457,10 +452,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else {
                 // 移除任务完成样式
-                if (debugInput) {
-                    debugInput.value = '提示信息';
-                    debugInput.classList.remove('task-completed');
-                }
                 if (footer) {
                     footer.classList.remove('task-completed');
                 }
@@ -1152,18 +1143,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     break;
                 }
 
-                // 等待2秒后自动开始下一份，期间允许暂停或停止
-                appendStreamContent('\n⏳ 2秒后自动批改下一份...\n');
-                var waitUntil = Date.now() + 2000;
-                while (Date.now() < waitUntil && !gradingStopped) {
-                    if (gradingPaused) {
-                        setStatusLine('已暂停，点击继续恢复批改');
-                        debugInput.value = '批改已暂停';
-                        await new Promise(function(resolve) { setTimeout(resolve, 200); });
-                        continue;
-                    }
-                    await new Promise(function(resolve) { setTimeout(resolve, 100); });
-                }
                 if (gradingStopped) {
                     resetGradingProgress();
                     debugInput.value = '批改已停止，进度已重置';
