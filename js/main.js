@@ -1429,7 +1429,13 @@ document.addEventListener('DOMContentLoaded', function() {
                         if (modelNameElement) {
                             modelNameElement.value = selectedPreset.modelName;
                         }
-                        
+
+                        // 恢复 OCR API Key
+                        var ocrKeyElement = document.getElementById('api-key-zhipu-ocr');
+                        if (ocrKeyElement && selectedPreset.ocrApiKey) {
+                            ocrKeyElement.value = selectedPreset.ocrApiKey;
+                        }
+
                         alert('预设加载成功！');
                     }
                 } else {
@@ -1471,6 +1477,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     if (modelNameElement) {
                         modelNameElement.value = preset.modelName;
+                    }
+
+                    // 恢复 OCR API Key
+                    var ocrKeyElement = document.getElementById('api-key-zhipu-ocr');
+                    if (ocrKeyElement && preset.ocrApiKey) {
+                        ocrKeyElement.value = preset.ocrApiKey;
                     }
                 }
             }

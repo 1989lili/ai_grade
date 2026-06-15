@@ -844,10 +844,41 @@
             text-decoration: underline;
         }
         
+        /* OCR 配置区块（所有 provider 共用） */
+        .ocr-config-section {
+            margin-bottom: 16px;
+            padding: 14px 16px;
+            background: #fffbf0;
+            border: 1px solid #f0d78c;
+            border-radius: 8px;
+        }
+        .ocr-config-section h4 {
+            margin: 0 0 6px 0;
+            color: #e65100;
+            font-size: 14px;
+        }
+        .ocr-required {
+            color: #d32f2f;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .ocr-hint {
+            font-size: 12px;
+            color: #888;
+            margin: 0 0 10px 0;
+        }
+
+        /* 服务商配置区块共用 */
+        .provider-config {
+            margin-bottom: 20px;
+        }
+        .provider-config h4 {
+            margin: 0 0 15px 0;
+            color: #333;
+        }
         .doubao-config-section {
             margin-bottom: 20px;
         }
-        
         .doubao-config-section h4 {
             margin: 0 0 15px 0;
             color: #333;
@@ -1106,6 +1137,12 @@
             margin-bottom: 4px;
             padding-top: 8px;
             border-top: 1px solid #e8e8e8;
+        }
+        .result-section-meta {
+            font-size: 11px;
+            font-weight: normal;
+            color: #999;
+            margin-left: 6px;
         }
         .result-section-content {
             font-size: 13px;

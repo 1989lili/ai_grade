@@ -233,7 +233,7 @@ LLM_RETRY_BACKOFF_SECONDS = 2
 LLM_MAX_TOKENS = 1024
 LLM_STREAM_MAX_TOKENS = 400
 # 流式调用首包（首个 token 或 reasoning 片段）必须在该秒数内到达，否则视为超时
-LLM_FIRST_BYTE_TIMEOUT = 4
+LLM_FIRST_BYTE_TIMEOUT = 8
 
 
 class GradingError(Exception):
@@ -642,8 +642,13 @@ def parse_score(response_text):
     # 尝试中文格式：得分: 8/10、分数: 8
     cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
     if cn_match:
+        # 尝试提取简评/评析内容
+        review_analysis = ''
+        ra_match = re.search(r'(?:简评|评析)[:：]\s*(.+?)(?:\n|。|$)', text)
+        if ra_match:
+            review_analysis = ra_match.group(1).strip()
         return {'score': float(cn_match.group(1)), 'max_score': int(cn_match.group(2)),
-                'reasoning': text, 'student_answer': '', 'review_analysis': ''}
+                'reasoning': text, 'student_answer': '', 'review_analysis': review_analysis}
 
     # 尝试纯数字：8/10
     num_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
