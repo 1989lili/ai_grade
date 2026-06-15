@@ -1047,9 +1047,11 @@
         }
 
         .process-result {
-            display: none;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
             border-radius: 8px;
-            padding: 10px;
+            padding: 14px 16px;
             background-color: #f8fbff;
             border: 1px solid #dce8f7;
             font-size: 13px;
@@ -1058,7 +1060,14 @@
         }
 
         .process-result.active {
-            display: block;
+            background-color: #f8fbff;
+        }
+
+        .result-empty-tip {
+            color: #aaa;
+            text-align: center;
+            padding: 20px 0;
+            font-size: 13px;
         }
 
         .process-result .score {
@@ -1104,6 +1113,15 @@
             line-height: 1.7;
             white-space: pre-wrap;
             word-break: break-word;
+        }
+
+        .result-timing-line {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed #e8e8e8;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
         }
 
         /* 流式内容展示 */

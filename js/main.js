@@ -122,6 +122,9 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (selectedProvider === 'deepseek') {
                 apiUrlLink.href = 'https://platform.deepseek.com/';
                 apiUrlLink.textContent = 'https://platform.deepseek.com/';
+            } else if (selectedProvider === 'zhipu') {
+                apiUrlLink.href = 'https://open.bigmodel.cn/';
+                apiUrlLink.textContent = 'https://open.bigmodel.cn/';
             }
         });
     }
@@ -129,10 +132,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // 获取当前选中服务商的配置
     function getCurrentProviderConfig() {
         const selectedProvider = document.querySelector('.provider-select').value;
+        const ocrInput = document.getElementById('api-key-zhipu-ocr');
         return {
             provider: selectedProvider,
             apiKey: document.getElementById(`api-key-${selectedProvider}`).value,
-            modelName: document.getElementById(`model-name-${selectedProvider}`).value
+            modelName: document.getElementById(`model-name-${selectedProvider}`).value,
+            ocrApiKey: ocrInput ? ocrInput.value : ''
         };
     }
 
@@ -841,7 +846,7 @@ document.addEventListener('DOMContentLoaded', function() {
         var resultBox = document.getElementById('grading-result');
         if (resultBox) {
             resultBox.classList.remove('active');
-            resultBox.textContent = '';
+            resultBox.innerHTML = '<div class="result-empty-tip">点击"批改"后评分结果将显示在此处</div>';
         }
         var streamBox = document.getElementById('grading-stream-content');
         if (streamBox) {
@@ -875,18 +880,20 @@ document.addEventListener('DOMContentLoaded', function() {
         resultBox.textContent = '';
         resultBox.classList.add('active');
 
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
         if (result.status === 'success') {
-            var scoreLine = document.createElement('div');
-            scoreLine.className = 'result-score-line';
-            scoreLine.innerHTML = '<span class="result-score-big">' + result.score + '</span>' +
-                                  '<span class="result-score-divider"> / </span>' +
-                                  '<span class="result-score-max">' + result.max_score + '</span>';
-            resultBox.appendChild(scoreLine);
+            var ocrLabel = result.ocr_label || '智谱-GLM-OCR';
+            var providerLabel = result.provider_label || '';
 
             if (result.student_answer) {
                 var saTitle = document.createElement('div');
                 saTitle.className = 'result-section-title';
-                saTitle.textContent = '学生作答';
+                saTitle.innerHTML = '【学生作答】<span class="result-section-meta">· ' + escapeHtml(ocrLabel) + '</span>';
                 resultBox.appendChild(saTitle);
                 var saContent = document.createElement('div');
                 saContent.className = 'result-section-content';
@@ -897,7 +904,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (result.review_analysis) {
                 var raTitle = document.createElement('div');
                 raTitle.className = 'result-section-title';
-                raTitle.textContent = '阅卷评析';
+                if (providerLabel) {
+                    raTitle.innerHTML = '【阅卷评析】<span class="result-section-meta">· ' + escapeHtml(providerLabel) + '</span>';
+                } else {
+                    raTitle.textContent = '【阅卷评析】';
+                }
                 resultBox.appendChild(raTitle);
                 var raContent = document.createElement('div');
                 raContent.className = 'result-section-content';
@@ -905,15 +916,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 resultBox.appendChild(raContent);
             }
 
-            if (result.reasoning) {
-                var rTitle = document.createElement('div');
-                rTitle.className = 'result-section-title';
-                rTitle.textContent = '评分依据';
-                resultBox.appendChild(rTitle);
-                var rContent = document.createElement('div');
-                rContent.className = 'result-section-content';
-                rContent.textContent = result.reasoning;
-                resultBox.appendChild(rContent);
+            var sTitle = document.createElement('div');
+            sTitle.className = 'result-section-title';
+            sTitle.textContent = '【成绩得分】';
+            resultBox.appendChild(sTitle);
+            var scoreLine = document.createElement('div');
+            scoreLine.className = 'result-score-line';
+            scoreLine.innerHTML = '<span class="result-score-big">' + result.score + '</span>' +
+                                  '<span class="result-score-divider"> / </span>' +
+                                  '<span class="result-score-max">' + result.max_score + '</span>';
+            resultBox.appendChild(scoreLine);
+
+            // 时延小字（埋点：截图压缩 / OCR / 首响 / 评分 / 总）
+            if (result.timings) {
+                var t = result.timings;
+                var fmt = function(ms) { return (ms == null) ? '—' : (ms / 1000).toFixed(2) + 's'; };
+                var parts = [];
+                if (t.capture_ms != null) parts.push('截图 ' + fmt(t.capture_ms));
+                if (t.ocr_ms != null) parts.push('OCR ' + fmt(t.ocr_ms));
+                if (t.model_first_byte_ms != null) parts.push('首响 ' + fmt(t.model_first_byte_ms));
+                if (t.model_ms != null) parts.push('评分 ' + fmt(t.model_ms));
+                if (t.total_ms != null) parts.push('总计 ' + fmt(t.total_ms));
+                if (parts.length > 0) {
+                    var timingLine = document.createElement('div');
+                    timingLine.className = 'result-timing-line';
+                    timingLine.textContent = parts.join(' · ');
+                    resultBox.appendChild(timingLine);
+                }
             }
         } else {
             var errScore = document.createElement('div');
@@ -962,10 +991,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        gradingPaused = false;
-        gradingStopped = false;
         setGradingButtons(true);
-        gradingAbortController = new AbortController();
 
         var cardArea = rects.card;
         var scoreBox = rects.score;
@@ -977,23 +1003,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // ── 循环批改，直到完成 ──
         while (true) {
-            if (gradingStopped) {
-                resetGradingProgress();
-                debugInput.value = '批改已停止，进度已重置';
-                break;
-            }
-
-            while (gradingPaused && !gradingStopped) {
-                setStatusLine('已暂停，点击继续恢复批改');
-                debugInput.value = '批改已暂停';
-                await new Promise(function(resolve) { setTimeout(resolve, 200); });
-            }
-            if (gradingStopped) {
-                resetGradingProgress();
-                debugInput.value = '批改已停止，进度已重置';
-                break;
-            }
-
             total = parseInt(totalInput.value) || 0;
             completed = parseInt(completedInput.value) || 0;
             if (completed >= total) {
@@ -1038,18 +1047,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 var analyzeResult = null;
                 var reasoningStarted = false;
                 var partialScoreShown = false;
-                // 每个请求前创建新的 AbortController
-                gradingAbortController = new AbortController();
+                var analyzeTimings = {};
                 var analyzeResponse = await fetch('/api/grade/analyze-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    signal: gradingAbortController.signal,
                     body: JSON.stringify({
                         cardArea: cardArea,
                         standards: scoringStandards,
                         provider: config.provider,
                         apiKey: config.apiKey,
-                        modelName: config.modelName
+                        modelName: config.modelName,
+                        ocrApiKey: config.ocrApiKey
                     })
                 });
 
@@ -1080,8 +1088,43 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         return;
                     }
+                    if (event.type === 'ocr_text') {
+                        // OCR 文本一次性到达，缓存到 timing 同名集合中，等 final 渲染
+                        analyzeTimings.__ocr_text = event.text || '';
+                        return;
+                    }
+                    if (event.type === 'timing') {
+                        // 后端埋点的耗时事件：capture / model_first_byte / model_call / parse
+                        analyzeTimings[event.key] = event.duration_ms;
+                        return;
+                    }
                     if (event.type === 'final') {
                         analyzeResult = event.result;
+                        // OCR 文本兜底：若后端 final 缺 student_answer，使用流式 ocr_text 缓存
+                        if (analyzeResult && !analyzeResult.student_answer && analyzeTimings.__ocr_text) {
+                            analyzeResult.student_answer = analyzeTimings.__ocr_text;
+                        }
+                        // 合并本地累积的 timing 事件，兜底后端 final.timings 缺字段的情况
+                        if (analyzeResult && !analyzeResult.timings) {
+                            analyzeResult.timings = {};
+                        }
+                        if (analyzeResult && analyzeResult.timings) {
+                            if (analyzeTimings.capture != null && analyzeResult.timings.capture_ms == null) {
+                                analyzeResult.timings.capture_ms = analyzeTimings.capture;
+                            }
+                            if (analyzeTimings.ocr != null && analyzeResult.timings.ocr_ms == null) {
+                                analyzeResult.timings.ocr_ms = analyzeTimings.ocr;
+                            }
+                            if (analyzeTimings.model_first_byte != null && analyzeResult.timings.model_first_byte_ms == null) {
+                                analyzeResult.timings.model_first_byte_ms = analyzeTimings.model_first_byte;
+                            }
+                            if (analyzeTimings.model_call != null && analyzeResult.timings.model_ms == null) {
+                                analyzeResult.timings.model_ms = analyzeTimings.model_call;
+                            }
+                            if (analyzeTimings.parse != null && analyzeResult.timings.parse_ms == null) {
+                                analyzeResult.timings.parse_ms = analyzeTimings.parse;
+                            }
+                        }
                         return;
                     }
                     if (event.type === 'error') {
@@ -1143,12 +1186,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     break;
                 }
 
-                if (gradingStopped) {
-                    resetGradingProgress();
-                    debugInput.value = '批改已停止，进度已重置';
-                    break;
-                }
-
             } catch (error) {
                 stopElapsedTimer();
                 if (api.hide_scan_line) api.hide_scan_line();
@@ -1158,48 +1195,23 @@ document.addEventListener('DOMContentLoaded', function() {
                     api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
                     api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
                 }
-                // AbortError 是用户手动停止，不算错误
-                if (error.name === 'AbortError') {
-                    if (gradingStopped) {
-                        resetGradingProgress();
-                        debugInput.value = '批改已停止，进度已重置';
-                    } else {
-                        debugInput.value = '批改已取消';
-                    }
-                } else {
-                    appendStreamContent('\n[错误] ' + error.message + '\n');
-                    showGradingResult({ status: 'error', message: error.message });
-                    debugInput.value = '批改出错: ' + error.message;
-                }
+                appendStreamContent('\n[错误] ' + error.message + '\n');
+                showGradingResult({ status: 'error', message: error.message });
+                debugInput.value = '批改出错: ' + error.message;
                 break;
             }
         }
 
-        gradingPaused = false;
-        gradingStopped = false;
         setGradingButtons(false);
-        gradingAbortController = null;
     }
 
     var correctBtn = document.getElementById('correct-btn');
-    var pauseBtn = document.getElementById('pause-btn');
-    var stopBtn = document.getElementById('stop-btn');
-    var gradingAbortController = null;
     var gradingActive = false;
-    var gradingPaused = false;
-    var gradingStopped = false;
 
     function setGradingButtons(grading) {
         gradingActive = grading;
         if (correctBtn) {
             correctBtn.disabled = grading;
-        }
-        if (pauseBtn) {
-            pauseBtn.disabled = !grading;
-            pauseBtn.textContent = gradingPaused ? '继续' : '暂停';
-        }
-        if (stopBtn) {
-            stopBtn.disabled = !grading;
         }
     }
 
@@ -1212,33 +1224,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!gradingActive) correctBtn.disabled = false;
             }, 3000);
             startGrading();
-        });
-    }
-
-    if (pauseBtn) {
-        pauseBtn.addEventListener('click', function() {
-            if (pauseBtn.disabled) return;
-            gradingPaused = !gradingPaused;
-            pauseBtn.textContent = gradingPaused ? '继续' : '暂停';
-            setStatusLine(gradingPaused ? '已暂停，点击继续恢复批改' : '继续批改中...');
-            var debugInput = document.querySelector('.debug-info input');
-            if (debugInput) debugInput.value = gradingPaused ? '批改已暂停' : '继续批改中...';
-        });
-    }
-
-    if (stopBtn) {
-        stopBtn.addEventListener('click', function() {
-            if (stopBtn.disabled) return;
-            gradingStopped = true;
-            gradingPaused = false;
-            setStatusLine('正在停止并重置进度...');
-            if (gradingAbortController) {
-                gradingAbortController.abort();
-                gradingAbortController = null;
-            } else {
-                resetGradingProgress();
-                setGradingButtons(false);
-            }
         });
     }
 
@@ -1420,9 +1405,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     const selectedIndex = prompt('请选择要加载的预设：\n' + presetOptions);
                     if (selectedIndex && !isNaN(selectedIndex) && selectedIndex > 0 && selectedIndex <= presets.length) {
                         const selectedPreset = presets[selectedIndex - 1];
-                        
+
                         // 切换服务商
                         const providerSelect = document.querySelector('.provider-select');
+                        // 老预设的 provider 可能已下线；下拉里没有就跳过，避免后续误填
+                        const hasOption = Array.from(providerSelect.options).some(o => o.value === selectedPreset.provider);
+                        if (!hasOption) {
+                            alert('该预设的服务商已不可用：' + selectedPreset.provider);
+                            return;
+                        }
                         providerSelect.value = selectedPreset.provider;
                         
                         // 触发change事件以更新配置区域
@@ -1463,6 +1454,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 切换服务商
                 const providerSelect = document.querySelector('.provider-select');
                 if (providerSelect) {
+                    // 老预设的 provider 可能已下线；下拉里没有就跳过自动加载
+                    const hasOption = Array.from(providerSelect.options).some(o => o.value === preset.provider);
+                    if (!hasOption) return;
                     providerSelect.value = preset.provider;
                     
                     // 触发change事件以更新配置区域

@@ -60,6 +60,20 @@
                     
                     <!-- 深度分析内容 -->
                     <div id="network-depth-analysis-content" class="params-content active">
+                        <!-- 智谱 OCR 配置（所有 provider 共用） -->
+                        <div class="ocr-config-section">
+                            <h4>智谱 GLM-OCR 识别 <span class="ocr-required">（必填）</span></h4>
+                            <p class="ocr-hint">所有服务商批改前都会先调用智谱 GLM-OCR 识别手写文字</p>
+                            <div class="config-item">
+                                <label for="api-key-zhipu-ocr">智谱 API Key:</label>
+                                <div class="api-key-input">
+                                    <input type="password" id="api-key-zhipu-ocr"
+                                           placeholder="智谱 API Key（形如 xxxxxx.xxxxxx）">
+                                    <button class="eye-btn">👁️</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="service-provider-container">
                             <div class="service-provider-section">
                                 <div class="service-provider-select">
@@ -67,6 +81,7 @@
                                     <select class="provider-select">
                                         <option value="doubao">字节豆包</option>
                                         <option value="deepseek">深度求索</option>
+                                        <option value="zhipu">智谱AI</option>
                                     </select>
                                 </div>
                                 <div class="api-key-url">
@@ -87,9 +102,15 @@
                             </div>
                             <div class="config-item">
                                 <label for="model-name-doubao">模型名称:</label>
-                                <select id="model-name-doubao" class="model-select">
-                                    <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215</option>
-                                </select>
+                                <input type="text" id="model-name-doubao" class="model-select"
+                                       list="doubao-model-options"
+                                       placeholder="model id 或 ep-xxx，可从火山控制台复制" />
+                                <datalist id="doubao-model-options">
+                                    <option value="doubao-seed-1-6-flash-250715">doubao-seed-1-6-flash（速度优先 / 多模态）</option>
+                                    <option value="doubao-1.5-vision-lite-250315">doubao-1.5-vision-lite（轻量多模态）</option>
+                                    <option value="doubao-1.5-vision-pro-250328">doubao-1.5-vision-pro（质量优先）</option>
+                                    <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215（旧版 / 慢）</option>
+                                </datalist>
                             </div>
                         </div>
                         
@@ -108,6 +129,24 @@
                                     <option value="deepseek-v4-flash">deepseek-v4-flash（速度优先）</option>
                                     <option value="deepseek-chat">deepseek-chat</option>
                                     <option value="deepseek-v4-pro">deepseek-v4-pro（质量优先）</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="zhipu-config-section provider-config" data-provider="zhipu" style="display: none;">
+                            <h4>智谱AI配置</h4>
+                            <div class="config-item">
+                                <label for="api-key-zhipu">API Key:</label>
+                                <div class="api-key-input">
+                                    <input type="password" id="api-key-zhipu" placeholder="请输入API Key">
+                                    <button class="eye-btn">👁️</button>
+                                </div>
+                            </div>
+                            <div class="config-item">
+                                <label for="model-name-zhipu">模型名称:</label>
+                                <select id="model-name-zhipu" class="model-select">
+                                    <option value="glm-4v-flash">glm-4v-flash（速度优先 / 免费）</option>
+                                    <option value="glm-4v-plus">glm-4v-plus（质量优先）</option>
                                 </select>
                             </div>
                         </div>
@@ -368,9 +407,9 @@
                         <div class="process-title">评分过程</div>
                         <div id="grading-elapsed" class="process-elapsed">未开始</div>
                     </div>
-                    <div id="grading-status-line" class="status-line"></div>
-                    <div id="grading-stream-content" class="stream-output">点击"批改"后AI评分内容将实时显示在此处</div>
-                    <div id="grading-result" class="process-result"></div>
+                    <div id="grading-result" class="process-result">
+                        <div class="result-empty-tip">点击"批改"后评分结果将显示在此处</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -378,8 +417,6 @@
         <div class="footer">
             <div class="footer-top">
                 <button class="action-btn correct" id="correct-btn">批改</button>
-                <button class="action-btn pause" id="pause-btn" disabled>暂停</button>
-                <button class="action-btn stop" id="stop-btn" disabled>停止</button>
                 <div class="debug-info">
                     <input type="text" value="提示信息" readonly>
                 </div>

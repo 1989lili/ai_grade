@@ -119,9 +119,73 @@ def capture_screen(x, y, w, h):
 
 
 def capture_screen_base64(x, y, w, h):
-    """截屏并返回 base64 字符串"""
+    """截屏并返回预处理后的 base64 字符串与元数据。
+
+    返回 dict:
+      base64    - 图像 base64
+      mime_type - 'image/jpeg' 或 'image/png'（PIL 失败回退）
+      meta      - 预处理元信息（输入/输出字节、是否缩放、尺寸）
+    """
     png_bytes = capture_screen(x, y, w, h)
-    return base64.b64encode(png_bytes).decode('utf-8')
+    processed_bytes, mime_type, meta = preprocess_card_image(png_bytes)
+    return {
+        'base64': base64.b64encode(processed_bytes).decode('utf-8'),
+        'mime_type': mime_type,
+        'meta': meta,
+    }
+
+
+# ---------- 图像预处理 ----------
+
+# 长边压缩到 1600px 内 + JPEG 70% 质量；目标输出 80~200KB。
+# 同时大幅减小上传体积（4K 截图原始 PNG 可达数 MB）。
+PREPROCESS_MAX_LONG_EDGE = 1600
+PREPROCESS_JPEG_QUALITY = 70
+
+
+def preprocess_card_image(png_bytes):
+    """把答题卡截图压缩为 JPEG。失败则原 PNG 兜底。"""
+    input_bytes = len(png_bytes)
+    try:
+        from io import BytesIO
+        from PIL import Image
+        img = Image.open(BytesIO(png_bytes))
+        # JPEG 不支持 alpha，转 RGB
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        orig_w, orig_h = img.size
+        long_edge = max(orig_w, orig_h)
+        resized = False
+        if long_edge > PREPROCESS_MAX_LONG_EDGE:
+            scale = PREPROCESS_MAX_LONG_EDGE / float(long_edge)
+            new_size = (max(1, int(orig_w * scale)), max(1, int(orig_h * scale)))
+            img = img.resize(new_size, Image.LANCZOS)
+            resized = True
+        out = BytesIO()
+        img.save(out, format='JPEG', quality=PREPROCESS_JPEG_QUALITY, optimize=True)
+        out_bytes = out.getvalue()
+        meta = {
+            'input_bytes': input_bytes,
+            'output_bytes': len(out_bytes),
+            'width': img.size[0],
+            'height': img.size[1],
+            'resized': resized,
+            'fallback': False,
+        }
+        log.info('图片预处理: png=%d, jpeg=%d, resized=%s, size=%dx%d',
+                 input_bytes, len(out_bytes), resized, img.size[0], img.size[1])
+        return out_bytes, 'image/jpeg', meta
+    except Exception as exc:
+        log.warning('图片预处理失败，回退到原 PNG: %s', exc)
+        meta = {
+            'input_bytes': input_bytes,
+            'output_bytes': input_bytes,
+            'width': 0,
+            'height': 0,
+            'resized': False,
+            'fallback': True,
+        }
+        return png_bytes, 'image/png', meta
 
 
 # ---------- 桌面自动化 ----------
@@ -162,12 +226,14 @@ def auto_click_submit(x, y):
 
 # ---------- 多模态 LLM 调用 ----------
 
-LLM_CONNECT_TIMEOUT = 10
-LLM_READ_TIMEOUT = 180
+LLM_CONNECT_TIMEOUT = 5
+LLM_READ_TIMEOUT = 30
 LLM_MAX_RETRIES = 1
 LLM_RETRY_BACKOFF_SECONDS = 2
 LLM_MAX_TOKENS = 1024
-LLM_STREAM_MAX_TOKENS = 512
+LLM_STREAM_MAX_TOKENS = 400
+# 流式调用首包（首个 token 或 reasoning 片段）必须在该秒数内到达，否则视为超时
+LLM_FIRST_BYTE_TIMEOUT = 4
 
 
 class GradingError(Exception):
@@ -179,7 +245,16 @@ class GradingError(Exception):
         self.detail = detail
 
 
-from grading_prompts import GRADING_SYSTEM_PROMPT, GRADING_STREAM_SYSTEM_PROMPT
+from grading_prompts import (
+    GRADING_SYSTEM_PROMPT,
+    GRADING_STREAM_SYSTEM_PROMPT,
+    GRADING_TEXT_STREAM_SYSTEM_PROMPT,
+)
+
+try:
+    from .zhipu_ocr import call_handwriting_ocr, OCRError
+except ImportError:
+    from zhipu_ocr import call_handwriting_ocr, OCRError  # type: ignore
 
 
 def html_to_text(value):
@@ -195,23 +270,33 @@ def html_to_text(value):
     return text.strip()
 
 
-def build_grading_messages(image_base64, standards, streaming=False):
-    """构建多模态 grading prompt"""
+def build_grading_messages(image_base64, standards, streaming=False, image_mime_type='image/png',
+                           ocr_text=None):
+    """构建 grading prompt。
+
+    - ocr_text 非空：纯文本路径（OCR 已完成手写识别），不附图片
+    - ocr_text 为空：原多模态路径（图片 + 评分标准）
+    """
+    use_text_path = bool(ocr_text and ocr_text.strip())
     parts = []
 
-    # 图片
-    parts.append({
-        "type": "image_url",
-        "image_url": {"url": f"data:image/png;base64,{image_base64}"}
-    })
+    if not use_text_path:
+        parts.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{image_mime_type};base64,{image_base64}"}
+        })
 
     material = html_to_text(standards.get('material', ''))
     answer = html_to_text(standards.get('answer', ''))
     example = html_to_text(standards.get('example', ''))
     requirement = html_to_text(standards.get('requirement', ''))
 
-    # 文本 prompt（精简）
-    text_parts = ["请对下面的答题卡截图进行评分。"]
+    text_parts = []
+    if use_text_path:
+        text_parts.append("请对下面的学生作答进行评分。")
+        text_parts.append(f"【学生作答（OCR识别）】\n{ocr_text.strip()}")
+    else:
+        text_parts.append("请对下面的答题卡截图进行评分。")
 
     if material:
         text_parts.append(f"【题目材料】\n{material}")
@@ -226,7 +311,7 @@ def build_grading_messages(image_base64, standards, streaming=False):
         text_parts.append(
             "请快速评分。开头必须直接输出：得分：<score>/<max_score>，简评：<一句话>。"
             "不要输出铺垫语、思考过程或 Markdown。最后一行输出一个可解析的 JSON：\n"
-            "{\"student_answer\":\"<简短作答>\",\"review_analysis\":\"<1-2句>\",\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<一句话依据>\"}"
+            "{\"student_answer\":\"<原作答>\",\"review_analysis\":\"<1-2句>\",\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<一句话依据>\"}"
         )
     else:
         text_parts.append(
@@ -236,8 +321,12 @@ def build_grading_messages(image_base64, standards, streaming=False):
 
     parts.append({"type": "text", "text": "\n\n".join(text_parts)})
 
+    if streaming:
+        system_prompt = GRADING_TEXT_STREAM_SYSTEM_PROMPT if use_text_path else GRADING_STREAM_SYSTEM_PROMPT
+    else:
+        system_prompt = GRADING_SYSTEM_PROMPT
     return [
-        {"role": "system", "content": GRADING_STREAM_SYSTEM_PROMPT if streaming else GRADING_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": parts}
     ]
 
@@ -247,6 +336,8 @@ def get_provider_api_url(provider):
         return "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
     if provider == 'deepseek':
         return "https://api.deepseek.com/v1/chat/completions"
+    if provider == 'zhipu':
+        return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     raise GradingError(f"不支持的服务商: {provider}", code='unsupported_provider', status_code=400)
 
 
@@ -264,11 +355,15 @@ def raise_for_model_status(response):
     raise GradingError(f'模型服务请求失败，HTTP状态码：{status}', code='model_http_error', status_code=502)
 
 
-def make_grading_payload(model_name, image_base64, standards, streaming=False):
+def make_grading_payload(model_name, image_base64, standards, streaming=False, image_mime_type='image/png',
+                         ocr_text=None):
     payload = {
         "model": model_name,
-        "messages": build_grading_messages(image_base64, standards, streaming=streaming),
-        "temperature": 0.3,
+        "messages": build_grading_messages(image_base64, standards, streaming=streaming,
+                                           image_mime_type=image_mime_type,
+                                           ocr_text=ocr_text),
+        "temperature": 0,
+        "top_p": 0.1,
         "max_tokens": LLM_STREAM_MAX_TOKENS if streaming else LLM_MAX_TOKENS
     }
     if streaming:
@@ -276,7 +371,8 @@ def make_grading_payload(model_name, image_base64, standards, streaming=False):
     return payload
 
 
-def call_llm_for_grading(provider, api_key, model_name, image_base64, standards):
+def call_llm_for_grading(provider, api_key, model_name, image_base64, standards,
+                         image_mime_type='image/png', ocr_text=None):
     """调用大模型进行批改，返回响应文本和调用元数据。"""
     api_url = get_provider_api_url(provider)
     headers = {
@@ -285,7 +381,8 @@ def call_llm_for_grading(provider, api_key, model_name, image_base64, standards)
         "Authorization": f"Bearer {api_key}"
     }
 
-    payload = make_grading_payload(model_name, image_base64, standards)
+    payload = make_grading_payload(model_name, image_base64, standards,
+                                   image_mime_type=image_mime_type, ocr_text=ocr_text)
 
     total_attempts = LLM_MAX_RETRIES + 1
     started = time.monotonic()
@@ -360,7 +457,8 @@ def call_llm_for_grading(provider, api_key, model_name, image_base64, standards)
                        detail=str(last_error) if last_error else None)
 
 
-def stream_llm_for_grading(provider, api_key, model_name, image_base64, standards, out_queue):
+def stream_llm_for_grading(provider, api_key, model_name, image_base64, standards, out_queue,
+                           image_mime_type='image/png', ocr_text=None):
     """流式调用大模型，将 token/error/done 事件放入队列。"""
     api_url = get_provider_api_url(provider)
     headers = {
@@ -368,7 +466,8 @@ def stream_llm_for_grading(provider, api_key, model_name, image_base64, standard
         "Accept": "text/event-stream",
         "Authorization": f"Bearer {api_key}"
     }
-    payload = make_grading_payload(model_name, image_base64, standards, streaming=True)
+    payload = make_grading_payload(model_name, image_base64, standards, streaming=True,
+                                   image_mime_type=image_mime_type, ocr_text=ocr_text)
     total_attempts = LLM_MAX_RETRIES + 1
     started = time.monotonic()
     content_parts = []
@@ -608,6 +707,8 @@ def test_model():
             api_url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
         elif provider == 'deepseek':
             api_url = "https://api.deepseek.com/v1/chat/completions"
+        elif provider == 'zhipu':
+            api_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         else:
             return jsonify({'response': '错误：不支持的服务商'})
 
@@ -676,9 +777,12 @@ def analyze_card_grading(data):
     try:
         cx, cy, cw, ch = card_area['x'], card_area['y'], card_area['w'], card_area['h']
         log.info("截屏: x=%d, y=%d, w=%d, h=%d", cx, cy, cw, ch)
-        image_b64 = capture_screen_base64(cx, cy, cw, ch)
-        log.info("截屏成功, base64 长度: %d", len(image_b64))
-        build_step(steps, 'capture_card', '截取答题卡区域', 'success', '已截取答题卡区域，准备调用模型识别', capture_started)
+        capture = capture_screen_base64(cx, cy, cw, ch)
+        image_b64 = capture['base64']
+        image_mime = capture['mime_type']
+        log.info("截屏成功, base64 长度: %d, mime: %s", len(image_b64), image_mime)
+        build_step(steps, 'capture_card', '截取答题卡区域', 'success', '已截取答题卡区域，准备调用模型识别',
+                   capture_started, {'image_meta': capture['meta']})
     except Exception as exc:
         build_step(steps, 'capture_card', '截取答题卡区域', 'error', f'截图失败：{exc}', capture_started)
         raise GradingError('截图答题卡失败，请检查答题卡标记区域。', code='capture_failed', status_code=500,
@@ -687,7 +791,8 @@ def analyze_card_grading(data):
     model_started = time.monotonic()
     try:
         log.info("调用模型: provider=%s, model=%s", provider, model_name)
-        llm_result = call_llm_for_grading(provider, api_key, model_name, image_b64, standards)
+        llm_result = call_llm_for_grading(provider, api_key, model_name, image_b64, standards,
+                                          image_mime_type=image_mime)
         response_text = llm_result['content']
         log.info("模型响应: %s...", response_text[:200])
         build_step(
@@ -793,6 +898,7 @@ def ndjson_event(event_type, **payload):
 
 
 def stream_analyze_card_grading(data):
+    request_started = time.monotonic()
     if not data:
         yield ndjson_event('error', code='empty_request', message='请求数据为空')
         return
@@ -802,9 +908,14 @@ def stream_analyze_card_grading(data):
     api_key = data.get('apiKey', '')
     model_name = data.get('modelName', '')
     provider = data.get('provider', '')
+    ocr_api_key = data.get('ocrApiKey', '') or ''
 
     if not api_key:
         yield ndjson_event('error', code='missing_api_key', message='请先在AI配置页面填写API Key')
+        return
+    if not ocr_api_key:
+        yield ndjson_event('error', code='missing_ocr_api_key',
+                           message='请先在AI配置页面填写智谱 OCR API Key')
         return
     if not card_area:
         yield ndjson_event('error', code='missing_card_area', message='请先框定答题卡区域')
@@ -812,24 +923,67 @@ def stream_analyze_card_grading(data):
 
     yield ndjson_event('status', message='已收到评分请求，正在准备截图...')
 
-    # ── 截图 ──
+    # ── 截图 + 预处理 ──
     yield ndjson_event('status', message='正在截取答题卡区域...')
+    capture_started = time.monotonic()
     try:
         cx, cy, cw, ch = card_area['x'], card_area['y'], card_area['w'], card_area['h']
         log.info('截屏: x=%d, y=%d, w=%d, h=%d', cx, cy, cw, ch)
-        image_b64 = capture_screen_base64(cx, cy, cw, ch)
-        log.info('截屏成功, base64 长度: %d', len(image_b64))
-        yield ndjson_event('status', message='截图完成，正在调用AI模型...')
+        capture = capture_screen_base64(cx, cy, cw, ch)
+        image_b64 = capture['base64']
+        image_mime = capture['mime_type']
+        image_meta = capture['meta']
+        capture_ms = int((time.monotonic() - capture_started) * 1000)
+        log.info('截屏成功, base64 长度: %d, mime: %s, 耗时: %d ms', len(image_b64), image_mime, capture_ms)
+        yield ndjson_event('timing', key='capture', label='截图压缩', duration_ms=capture_ms,
+                           input_bytes=image_meta.get('input_bytes'),
+                           output_bytes=image_meta.get('output_bytes'),
+                           resized=image_meta.get('resized'))
     except Exception as exc:
         yield ndjson_event('error', code='capture_failed', message=f'截图答题卡失败：{exc}')
         return
 
-    # ── AI 评分（流式） ──
+    # ── 智谱 OCR（手写识别） ──
+    yield ndjson_event('status', message='正在调用智谱 OCR 识别手写文字...')
+    ocr_started = time.monotonic()
+    try:
+        # base64 解码回 bytes（capture 已经是预处理后的 jpeg/png 字节）
+        image_bytes = base64.b64decode(image_b64)
+        ext = 'jpg' if image_mime == 'image/jpeg' else 'png'
+        ocr_result = call_handwriting_ocr(
+            ocr_api_key,
+            image_bytes,
+            mime_type=image_mime,
+            filename=f'card.{ext}',
+        )
+        ocr_text = ocr_result['text']
+        ocr_ms = int((time.monotonic() - ocr_started) * 1000)
+        log.info('OCR 完成, 字数=%d, 耗时=%d ms', len(ocr_text), ocr_ms)
+        yield ndjson_event('timing', key='ocr', label='OCR识别', duration_ms=ocr_ms,
+                           words_count=ocr_result['words_count'])
+        # 把 OCR 文本一次性推给前端，前端塞到「学生作答」区
+        yield ndjson_event('ocr_text', text=ocr_text, words_count=ocr_result['words_count'])
+        if not ocr_text.strip():
+            yield ndjson_event('error', code='ocr_empty_result',
+                               message='OCR 未识别到手写作答，请确认框选范围或调整图片')
+            return
+    except OCRError as exc:
+        log.warning('OCR 失败: %s', exc.message)
+        yield ndjson_event('error', code=exc.code, message=exc.message)
+        return
+    except Exception as exc:
+        log.exception('OCR 调用异常')
+        yield ndjson_event('error', code='ocr_failed', message=f'OCR 调用失败：{exc}')
+        return
+
+    # ── AI 评分（流式，纯文本路径） ──
+    yield ndjson_event('status', message='OCR 完成，正在调用评分模型...')
     model_started = time.monotonic()
     model_queue = queue.Queue()
     worker = threading.Thread(
         target=stream_llm_for_grading,
         args=(provider, api_key, model_name, image_b64, standards, model_queue),
+        kwargs={'image_mime_type': image_mime, 'ocr_text': ocr_text},
         daemon=True
     )
     worker.start()
@@ -838,11 +992,19 @@ def stream_analyze_card_grading(data):
     full_text = ''
     llm_meta = {}
     partial_score_sent = False
+    first_byte_seen = False
+    first_byte_ms = None
     while True:
         try:
             item = model_queue.get(timeout=1)
         except queue.Empty:
             elapsed_ms = int((time.monotonic() - model_started) * 1000)
+            # 首包超时熔断：模型尚未吐出任何内容
+            if not first_byte_seen and elapsed_ms >= LLM_FIRST_BYTE_TIMEOUT * 1000:
+                log.warning('首包超时 %d ms（阈值 %d ms），熔断', elapsed_ms, LLM_FIRST_BYTE_TIMEOUT * 1000)
+                yield ndjson_event('error', code='model_first_byte_timeout',
+                                   message=f'模型 {LLM_FIRST_BYTE_TIMEOUT}s 内未返回内容，已熔断')
+                return
             yield ndjson_event('status',
                                message=f'AI正在识别评分，已等待 {elapsed_ms // 1000} 秒...',
                                elapsed_ms=elapsed_ms)
@@ -854,6 +1016,11 @@ def stream_analyze_card_grading(data):
                                elapsed_ms=int((time.monotonic() - model_started) * 1000))
         elif item_type == 'token':
             token_content = item.get('content', '')
+            if not first_byte_seen:
+                first_byte_seen = True
+                first_byte_ms = int((time.monotonic() - model_started) * 1000)
+                log.info('首包到达, 耗时 %d ms', first_byte_ms)
+                yield ndjson_event('timing', key='model_first_byte', label='首响', duration_ms=first_byte_ms)
             full_text += token_content
             yield ndjson_event('token', content=token_content)
             if not partial_score_sent:
@@ -862,6 +1029,11 @@ def stream_analyze_card_grading(data):
                     partial_score_sent = True
                     yield ndjson_event('partial_score', **partial_score)
         elif item_type == 'reasoning':
+            if not first_byte_seen:
+                first_byte_seen = True
+                first_byte_ms = int((time.monotonic() - model_started) * 1000)
+                log.info('首包到达（reasoning）, 耗时 %d ms', first_byte_ms)
+                yield ndjson_event('timing', key='model_first_byte', label='首响', duration_ms=first_byte_ms)
             yield ndjson_event('reasoning', content=item.get('content', ''))
         elif item_type == 'done':
             full_text = item.get('content', '')
@@ -874,17 +1046,42 @@ def stream_analyze_card_grading(data):
             yield ndjson_event('error', code=exc_err.code, message=exc_err.message)
             return
 
-    log.info('模型流式输出完成, 耗时 %d ms, 文本长度 %d', llm_meta.get('duration_ms', 0), len(full_text))
+    model_ms = int((time.monotonic() - model_started) * 1000)
+    log.info('模型流式输出完成, 耗时 %d ms, 文本长度 %d', llm_meta.get('duration_ms', model_ms), len(full_text))
+    yield ndjson_event('timing', key='model_call', label='评分', duration_ms=model_ms)
 
     # ── 解析结果 ──
+    parse_started = time.monotonic()
     try:
         parsed = parse_score(full_text)
         score = parsed['score']
         max_score = parsed['max_score']
         reasoning = parsed.get('reasoning', '')
-        student_answer = parsed.get('student_answer', '')
+        # 学生作答以 OCR 文本为准（覆盖模型可能的瞎写）
+        student_answer = ocr_text
         review_analysis = parsed.get('review_analysis', '')
-        log.info('解析分数: %s/%s', score, max_score)
+        parse_ms = int((time.monotonic() - parse_started) * 1000)
+        total_ms = int((time.monotonic() - request_started) * 1000)
+        log.info('解析分数: %s/%s, parse=%d ms, total=%d ms', score, max_score, parse_ms, total_ms)
+        yield ndjson_event('timing', key='parse', label='解析', duration_ms=parse_ms)
+
+        timings = {
+            'capture_ms': capture_ms,
+            'ocr_ms': ocr_ms,
+            'model_first_byte_ms': first_byte_ms,
+            'model_ms': model_ms,
+            'parse_ms': parse_ms,
+            'total_ms': total_ms,
+            'input_bytes': image_meta.get('input_bytes'),
+            'output_bytes': image_meta.get('output_bytes'),
+        }
+
+        provider_label_map = {
+            'zhipu': '智谱',
+            'doubao': '豆包',
+            'deepseek': 'DeepSeek',
+        }
+        provider_label = '%s-%s' % (provider_label_map.get(provider, provider), model_name)
 
         yield ndjson_event('final', result={
             'status': 'success',
@@ -894,6 +1091,10 @@ def stream_analyze_card_grading(data):
             'student_answer': student_answer,
             'review_analysis': review_analysis,
             'full_text': full_text,
+            'ocr_text': ocr_text,
+            'provider_label': provider_label,
+            'ocr_label': '智谱-GLM-OCR',
+            'timings': timings,
         })
     except Exception as exc:
         yield ndjson_event('error', code='score_parse_failed',
@@ -981,6 +1182,7 @@ def save_preset():
         api_key = data.get('apiKey', '')
         model_name = data.get('modelName', '')
         provider = data.get('provider', '')
+        ocr_api_key = data.get('ocrApiKey', '')
 
         if not api_key:
             return jsonify({'status': 'error', 'message': 'API Key不能为空'})
@@ -993,6 +1195,7 @@ def save_preset():
             'apiKey': api_key,
             'modelName': model_name,
             'provider': provider,
+            'ocrApiKey': ocr_api_key,
             'timestamp': datetime.datetime.now().isoformat()
         }
 
