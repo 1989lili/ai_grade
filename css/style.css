@@ -867,30 +867,6 @@
             color: #888;
             margin: 0 0 10px 0;
         }
-        .ocr-mode-toggle {
-            display: flex;
-            gap: 16px;
-            margin-bottom: 10px;
-        }
-        .ocr-mode-option {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        .ocr-mode-option input[type="radio"] {
-            margin: 0;
-            accent-color: #e65100;
-        }
-        .ocr-mode-option small {
-            font-size: 11px;
-            color: #999;
-        }
-        .ocr-cloud-key {
-            border-top: 1px dashed #e0d0a0;
-            padding-top: 10px;
-        }
 
         /* 服务商配置区块共用 */
         .provider-config {

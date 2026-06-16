@@ -253,10 +253,8 @@ from grading_prompts import (
 
 try:
     from .zhipu_ocr import call_handwriting_ocr, OCRError
-    from .local_ocr import call_local_ocr, LocalOCRError
 except ImportError:
     from zhipu_ocr import call_handwriting_ocr, OCRError  # type: ignore
-    from local_ocr import call_local_ocr, LocalOCRError  # type: ignore
 
 
 def html_to_text(value):
@@ -916,10 +914,13 @@ def stream_analyze_card_grading(data):
     model_name = data.get('modelName', '')
     provider = data.get('provider', '')
     ocr_api_key = data.get('ocrApiKey', '') or ''
-    ocr_mode = data.get('ocrMode', 'local')  # 'local' 或 'cloud'
 
     if not api_key:
         yield ndjson_event('error', code='missing_api_key', message='请先在AI配置页面填写API Key')
+        return
+    if not ocr_api_key:
+        yield ndjson_event('error', code='missing_ocr_api_key',
+                           message='请先在AI配置页面填写智谱 OCR API Key')
         return
     if not card_area:
         yield ndjson_event('error', code='missing_card_area', message='请先框定答题卡区域')
@@ -947,66 +948,37 @@ def stream_analyze_card_grading(data):
         yield ndjson_event('error', code='capture_failed', message=f'截图答题卡失败：{exc}')
         return
 
-    # ── OCR 识别（本地引擎优先，云端备用） ──
-    image_bytes = base64.b64decode(image_b64)
-    ocr_label = None
-    ocr_text = ''
-    ocr_result = None
-
-    # 先尝试本地 OCR
-    if ocr_mode == 'local':
-        yield ndjson_event('status', message='正在调用本地 OCR 引擎识别...')
-        ocr_started = time.monotonic()
-        try:
-            ocr_result = call_local_ocr(image_bytes)
-            ocr_text = ocr_result['text']
-            ocr_label = '本地OCR'
-        except (LocalOCRError, Exception) as exc:
-            log.warning('本地 OCR 失败: %s', exc)
-            # 如果有云端 Key，自动降级
-            if ocr_api_key:
-                yield ndjson_event('status', message='本地 OCR 失败，切换到智谱云端 OCR...')
-                ocr_mode = 'cloud'  # 临时切换
-            else:
-                yield ndjson_event('error', code='local_ocr_failed',
-                                   message=f'本地 OCR 失败且未配置云端 Key：{exc}')
-                return
-
-    # 云端 OCR（显式选择或本地失败降级）
-    if ocr_mode == 'cloud':
-        if not ocr_api_key:
-            yield ndjson_event('error', code='missing_ocr_api_key',
-                               message='请填写智谱 OCR API Key 或切换为本地 OCR')
+    # ── 智谱 OCR（手写识别） ──
+    yield ndjson_event('status', message='正在调用智谱 OCR 识别手写文字...')
+    ocr_started = time.monotonic()
+    try:
+        # base64 解码回 bytes（capture 已经是预处理后的 jpeg/png 字节）
+        image_bytes = base64.b64decode(image_b64)
+        ext = 'jpg' if image_mime == 'image/jpeg' else 'png'
+        ocr_result = call_handwriting_ocr(
+            ocr_api_key,
+            image_bytes,
+            mime_type=image_mime,
+            filename=f'card.{ext}',
+        )
+        ocr_text = ocr_result['text']
+        ocr_ms = int((time.monotonic() - ocr_started) * 1000)
+        log.info('OCR 完成, 字数=%d, 耗时=%d ms', len(ocr_text), ocr_ms)
+        yield ndjson_event('timing', key='ocr', label='OCR识别', duration_ms=ocr_ms,
+                           words_count=ocr_result['words_count'])
+        # 把 OCR 文本一次性推给前端，前端塞到「学生作答」区
+        yield ndjson_event('ocr_text', text=ocr_text, words_count=ocr_result['words_count'])
+        if not ocr_text.strip():
+            yield ndjson_event('error', code='ocr_empty_result',
+                               message='OCR 未识别到手写作答，请确认框选范围或调整图片')
             return
-        yield ndjson_event('status', message='正在调用智谱云端 OCR 识别手写文字...')
-        ocr_started = time.monotonic()
-        try:
-            ext = 'jpg' if image_mime == 'image/jpeg' else 'png'
-            ocr_result = call_handwriting_ocr(
-                ocr_api_key, image_bytes,
-                mime_type=image_mime, filename=f'card.{ext}',
-            )
-            ocr_text = ocr_result['text']
-            ocr_label = '智谱-GLM-OCR'
-        except OCRError as exc:
-            log.warning('云端 OCR 失败: %s', exc.message)
-            yield ndjson_event('error', code=exc.code, message=exc.message)
-            return
-        except Exception as exc:
-            log.exception('云端 OCR 调用异常')
-            yield ndjson_event('error', code='ocr_failed', message=f'云端 OCR 调用失败：{exc}')
-            return
-
-    ocr_ms = int((time.monotonic() - ocr_started) * 1000)
-    log.info('%s 完成, 字数=%d, 耗时=%d ms', ocr_label, len(ocr_text), ocr_ms)
-    yield ndjson_event('timing', key='ocr', label=ocr_label, duration_ms=ocr_ms,
-                       words_count=ocr_result['words_count'] if ocr_result else 0)
-    yield ndjson_event('ocr_text', text=ocr_text,
-                       words_count=ocr_result['words_count'] if ocr_result else 0,
-                       ocr_mode=ocr_mode)
-    if not ocr_text.strip():
-        yield ndjson_event('error', code='ocr_empty_result',
-                           message='OCR 未识别到手写作答，请确认框选范围或调整图片')
+    except OCRError as exc:
+        log.warning('OCR 失败: %s', exc.message)
+        yield ndjson_event('error', code=exc.code, message=exc.message)
+        return
+    except Exception as exc:
+        log.exception('OCR 调用异常')
+        yield ndjson_event('error', code='ocr_failed', message=f'OCR 调用失败：{exc}')
         return
 
     # ── AI 评分（流式，纯文本路径） ──
@@ -1126,7 +1098,7 @@ def stream_analyze_card_grading(data):
             'full_text': full_text,
             'ocr_text': ocr_text,
             'provider_label': provider_label,
-            'ocr_label': ocr_label,
+            'ocr_label': '智谱-GLM-OCR',
             'timings': timings,
         })
     except Exception as exc:
