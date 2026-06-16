@@ -1098,9 +1098,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 await readNdjsonStream(analyzeResponse, async function(event) {
                     if (event.type === 'status') {
-                        var statusMessage = event.message || '处理中...';
-                        setStatusLine(statusMessage);
-                        debugInput.value = statusMessage;
+                        setStatusLine(event.message || '处理中...');
                         return;
                     }
                     if (event.type === 'reasoning') {
@@ -1108,12 +1106,10 @@ document.addEventListener('DOMContentLoaded', function() {
                             setStatusLine('模型正在分析答题卡...');
                             reasoningStarted = true;
                         }
-                        debugInput.value = 'AI正在分析答题卡...';
                         return;
                     }
                     if (event.type === 'token') {
                         appendStreamContent(event.content || '');
-                        debugInput.value = 'AI评分内容接收中...';
                         return;
                     }
                     if (event.type === 'partial_score') {
@@ -1427,11 +1423,11 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 预设列表功能（可见面板）
+    // 预设列表功能（弹窗面板）
     const presetListBtn = document.querySelector('.preset-list-btn');
-    const presetPanel = document.querySelector('.preset-panel');
-    const presetPanelList = document.querySelector('.preset-panel-list');
-    const presetPanelClose = document.querySelector('.preset-panel-close');
+    const presetOverlay = document.getElementById('preset-overlay');
+    const presetPanelList = document.getElementById('preset-panel-list');
+    const presetPanelClose = document.getElementById('preset-panel-close');
 
     function loadPresetToUI(preset) {
         const providerSelect = document.querySelector('.provider-select');
@@ -1492,6 +1488,7 @@ document.addEventListener('DOMContentLoaded', function() {
             item.appendChild(delBtn);
             item.addEventListener('click', function() {
                 loadPresetToUI(preset);
+                closePresetPanel();
             });
             presetPanelList.appendChild(item);
         });
@@ -1508,20 +1505,31 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(function() {});
     }
 
-    if (presetListBtn && presetPanel) {
+    function openPresetPanel() {
+        if (presetOverlay) {
+            presetOverlay.classList.add('active');
+            refreshPresetPanel();
+        }
+    }
+    function closePresetPanel() {
+        if (presetOverlay) presetOverlay.classList.remove('active');
+    }
+
+    if (presetListBtn) {
         presetListBtn.addEventListener('click', function() {
-            var isVisible = presetPanel.style.display !== 'none';
-            if (isVisible) {
-                presetPanel.style.display = 'none';
+            if (presetOverlay && presetOverlay.classList.contains('active')) {
+                closePresetPanel();
             } else {
-                presetPanel.style.display = 'block';
-                refreshPresetPanel();
+                openPresetPanel();
             }
         });
     }
     if (presetPanelClose) {
-        presetPanelClose.addEventListener('click', function() {
-            presetPanel.style.display = 'none';
+        presetPanelClose.addEventListener('click', closePresetPanel);
+    }
+    if (presetOverlay) {
+        presetOverlay.addEventListener('click', function(e) {
+            if (e.target === presetOverlay) closePresetPanel();
         });
     }
 

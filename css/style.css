@@ -968,46 +968,65 @@
             color: white;
         }
 
-        /* 预设面板 */
+        /* 预设面板 —— 浮动弹窗 */
+        .preset-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.3);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .preset-overlay.active {
+            display: flex;
+        }
         .preset-panel {
-            margin-top: 12px;
+            width: 420px;
+            max-height: 360px;
             border: 1px solid #c8d6e5;
-            border-radius: 8px;
+            border-radius: 10px;
             background: #fff;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         .preset-panel-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px 12px;
+            padding: 10px 14px;
             background: #f0f5ff;
             border-bottom: 1px solid #e0e7f2;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: bold;
             color: #333;
+            flex-shrink: 0;
         }
         .preset-panel-close {
             border: none;
             background: none;
-            font-size: 18px;
+            font-size: 20px;
             cursor: pointer;
             color: #999;
             padding: 0 4px;
+            line-height: 1;
         }
         .preset-panel-close:hover { color: #d32f2f; }
         .preset-panel-list {
-            max-height: 200px;
+            flex: 1;
             overflow-y: auto;
+            max-height: 280px;
         }
         .preset-panel-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px 12px;
+            padding: 10px 14px;
             border-bottom: 1px solid #f0f0f0;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 13px;
             transition: background 0.2s;
         }
         .preset-panel-item:hover {

@@ -161,12 +161,14 @@
                             <button class="save-preset-btn">保存预设</button>
                             <button class="preset-list-btn">预设列表</button>
                         </div>
-                        <div class="preset-panel" style="display:none;">
-                            <div class="preset-panel-header">
-                                <span>已保存的预设</span>
-                                <button class="preset-panel-close">×</button>
+                        <div class="preset-overlay" id="preset-overlay">
+                            <div class="preset-panel">
+                                <div class="preset-panel-header">
+                                    <span>已保存的预设</span>
+                                    <button class="preset-panel-close" id="preset-panel-close">×</button>
+                                </div>
+                                <div class="preset-panel-list" id="preset-panel-list"></div>
                             </div>
-                            <div class="preset-panel-list"></div>
                         </div>
                     </div>
                     
