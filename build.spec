@@ -13,18 +13,11 @@ flask_datas, flask_binaries, flask_hiddenimports = collect_all('flask')
 werkzeug_datas, werkzeug_binaries, werkzeug_hiddenimports = collect_all('werkzeug')
 webview_datas, webview_binaries, webview_hiddenimports = collect_all('webview')
 rapidocr_datas, rapidocr_binaries, rapidocr_hiddenimports = collect_all('rapidocr_onnxruntime')
-ort_datas, ort_binaries, ort_hiddenimports = collect_all('onnxruntime')
-
-# opencv 的 native DLL 显式收集
-import cv2 as _cv2
-_cv2_dir = os.path.dirname(_cv2.__file__)
-_cv2_binaries = [(os.path.join(_cv2_dir, f), 'cv2') for f in os.listdir(_cv2_dir)
-                 if f.endswith(('.dll', '.pyd')) and not f.startswith('opencv_world')]
 
 a = Analysis(
     ['backend/launcher.py'],
     pathex=['backend'],
-    binaries=flask_binaries + werkzeug_binaries + webview_binaries + rapidocr_binaries + ort_binaries + _cv2_binaries + [
+    binaries=flask_binaries + werkzeug_binaries + webview_binaries + rapidocr_binaries + [
         (os.path.join(conda_bin, 'ffi.dll'), '.'),
         (os.path.join(conda_bin, 'sqlite3.dll'), '.'),
         (os.path.join(conda_bin, 'liblzma.dll'), '.'),
@@ -37,7 +30,7 @@ a = Analysis(
         ('index.html', '.'),
         ('js/main.js', 'js/'),
         ('css/style.css', 'css/'),
-    ] + flask_datas + werkzeug_datas + webview_datas + rapidocr_datas + ort_datas,
+    ] + flask_datas + werkzeug_datas + webview_datas + rapidocr_datas,
     hiddenimports=[
         'mss',
         'mss.tools',
@@ -88,7 +81,7 @@ a = Analysis(
         'bottle',
         'proxy_tools',
         'clr_loader',
-    ] + flask_hiddenimports + werkzeug_hiddenimports + webview_hiddenimports + rapidocr_hiddenimports + ort_hiddenimports,
+    ] + flask_hiddenimports + werkzeug_hiddenimports + webview_hiddenimports + rapidocr_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
