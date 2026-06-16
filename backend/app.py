@@ -1238,6 +1238,30 @@ def get_last_preset():
         return jsonify({'status': 'error', 'message': str(e)})
 
 
+@app.route('/api/delete-preset', methods=['POST'])
+def delete_preset():
+    try:
+        ensure_presets_file()
+        data = request.get_json(silent=True) or {}
+        index = data.get('index')
+        presets_data = secure_read_json(PRESETS_FILE)
+        if presets_data is None:
+            presets_data = {'presets': [], 'last_preset': None}
+        presets = presets_data.get('presets', [])
+        if index is None or index < 0 or index >= len(presets):
+            return jsonify({'status': 'error', 'message': '无效的预设索引'})
+        presets.pop(index)
+        presets_data['presets'] = presets
+        # 如果删除的是 last_preset，清除它
+        last = presets_data.get('last_preset')
+        if last and last not in presets:
+            presets_data['last_preset'] = presets[-1] if presets else None
+        secure_write_json(PRESETS_FILE, presets_data)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
 # ---------- 激活管理 ----------
 
 @app.route('/api/hwid', methods=['GET'])

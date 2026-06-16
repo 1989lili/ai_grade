@@ -102,15 +102,18 @@
                             </div>
                             <div class="config-item">
                                 <label for="model-name-doubao">模型名称:</label>
-                                <select id="model-name-doubao" class="model-select">
-                                    <option value="doubao-seed-1-6-flash-250715">doubao-seed-1-6-flash（速度优先 / 多模态）</option>
-                                    <option value="doubao-1.5-vision-lite-250315">doubao-1.5-vision-lite（轻量多模态）</option>
-                                    <option value="doubao-1.5-vision-pro-250328">doubao-1.5-vision-pro（质量优先）</option>
-                                    <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215</option>
-                                </select>
+                                <input type="text" id="model-name-doubao" class="model-select"
+                                       list="doubao-model-list" autocomplete="off"
+                                       placeholder="输入或选择模型名 / endpoint ID">
+                                <datalist id="doubao-model-list">
+                                    <option value="doubao-seed-1-6-flash-250715">
+                                    <option value="doubao-1.5-vision-lite-250315">
+                                    <option value="doubao-1.5-vision-pro-250328">
+                                    <option value="doubao-seed-2-0-pro-260215">
+                                </datalist>
                             </div>
                         </div>
-                        
+
                         <div class="deepseek-config-section provider-config" data-provider="deepseek" style="display: none;">
                             <h4>深度求索配置</h4>
                             <div class="config-item">
@@ -122,11 +125,14 @@
                             </div>
                             <div class="config-item">
                                 <label for="model-name-deepseek">模型名称:</label>
-                                <select id="model-name-deepseek" class="model-select">
-                                    <option value="deepseek-v4-flash">deepseek-v4-flash（速度优先）</option>
-                                    <option value="deepseek-chat">deepseek-chat</option>
-                                    <option value="deepseek-v4-pro">deepseek-v4-pro（质量优先）</option>
-                                </select>
+                                <input type="text" id="model-name-deepseek" class="model-select"
+                                       list="deepseek-model-list" autocomplete="off"
+                                       placeholder="输入或选择模型名">
+                                <datalist id="deepseek-model-list">
+                                    <option value="deepseek-v4-flash">
+                                    <option value="deepseek-chat">
+                                    <option value="deepseek-v4-pro">
+                                </datalist>
                             </div>
                         </div>
 
@@ -141,16 +147,26 @@
                             </div>
                             <div class="config-item">
                                 <label for="model-name-zhipu">模型名称:</label>
-                                <select id="model-name-zhipu" class="model-select">
-                                    <option value="glm-4v-flash">glm-4v-flash（速度优先 / 免费）</option>
-                                    <option value="glm-4v-plus">glm-4v-plus（质量优先）</option>
-                                </select>
+                                <input type="text" id="model-name-zhipu" class="model-select"
+                                       list="zhipu-model-list" autocomplete="off"
+                                       placeholder="输入或选择模型名">
+                                <datalist id="zhipu-model-list">
+                                    <option value="glm-4v-flash">
+                                    <option value="glm-4v-plus">
+                                </datalist>
                             </div>
                         </div>
                         
                         <div class="preset-buttons">
                             <button class="save-preset-btn">保存预设</button>
                             <button class="preset-list-btn">预设列表</button>
+                        </div>
+                        <div class="preset-panel" style="display:none;">
+                            <div class="preset-panel-header">
+                                <span>已保存的预设</span>
+                                <button class="preset-panel-close">×</button>
+                            </div>
+                            <div class="preset-panel-list"></div>
                         </div>
                     </div>
                     

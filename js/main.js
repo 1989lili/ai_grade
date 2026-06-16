@@ -102,10 +102,42 @@ document.addEventListener('DOMContentLoaded', function() {
     const apiUrlLink = document.querySelector('.api-url-link');
     const providerConfigs = document.querySelectorAll('.provider-config');
 
+    // 每个 provider 的上次配置缓存（页面内记忆，切换时自动恢复）
+    var providerMemory = {};
+
+    function loadProviderMemory() {
+        fetch('/api/get-presets')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'success' && data.presets.length > 0) {
+                    data.presets.forEach(function(p) {
+                        if (!providerMemory[p.provider] || p.timestamp > providerMemory[p.provider].timestamp) {
+                            providerMemory[p.provider] = {
+                                apiKey: p.apiKey || '',
+                                modelName: p.modelName || ''
+                            };
+                        }
+                    });
+                }
+            })
+            .catch(function() {});
+    }
+
+    function applyProviderMemory(provider) {
+        var mem = providerMemory[provider];
+        if (!mem) return;
+        var apiEl = document.getElementById('api-key-' + provider);
+        var modelEl = document.getElementById('model-name-' + provider);
+        if (apiEl && mem.apiKey) apiEl.value = mem.apiKey;
+        if (modelEl && mem.modelName) modelEl.value = mem.modelName;
+    }
+
+    loadProviderMemory();
+
     if (providerSelect && apiUrlLink && providerConfigs.length > 0) {
         providerSelect.addEventListener('change', function() {
             const selectedProvider = this.value;
-            
+
             // 切换配置区域
             providerConfigs.forEach(config => {
                 if (config.dataset.provider === selectedProvider) {
@@ -114,7 +146,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     config.style.display = 'none';
                 }
             });
-            
+
+            // 自动恢复该 provider 的上次配置
+            applyProviderMemory(selectedProvider);
+
             // 更新API Key申请地址
             if (selectedProvider === 'doubao') {
                 apiUrlLink.href = 'https://console.volcengine.com/';
@@ -1377,6 +1412,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 const data = await response.json();
                 if (data.status === 'success') {
+                    // 更新内存缓存，确保切换回来时能恢复
+                    providerMemory[config.provider] = {
+                        apiKey: config.apiKey,
+                        modelName: config.modelName
+                    };
                     alert('预设保存成功！');
                 } else {
                     alert('预设保存失败：' + data.message);
@@ -1387,65 +1427,101 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 预设列表功能
+    // 预设列表功能（可见面板）
     const presetListBtn = document.querySelector('.preset-list-btn');
-    if (presetListBtn) {
-        presetListBtn.addEventListener('click', async () => {
-            try {
-                const response = await fetch('/api/get-presets');
-                const data = await response.json();
-                
-                if (data.status === 'success' && data.presets.length > 0) {
-                    const presets = data.presets;
-                    let presetOptions = presets.map((preset, index) => {
-                        const date = new Date(preset.timestamp).toLocaleString();
-                        const model = preset.modelName || '(未设置模型)';
-                        const ocr = preset.ocrApiKey ? 'OCR已配置' : 'OCR未配置';
-                        return `${index + 1}. [${preset.provider}] ${model} — ${date} — ${ocr}`;
-                    }).join('\n');
-                    
-                    const selectedIndex = prompt('请选择要加载的预设：\n' + presetOptions);
-                    if (selectedIndex && !isNaN(selectedIndex) && selectedIndex > 0 && selectedIndex <= presets.length) {
-                        const selectedPreset = presets[selectedIndex - 1];
+    const presetPanel = document.querySelector('.preset-panel');
+    const presetPanelList = document.querySelector('.preset-panel-list');
+    const presetPanelClose = document.querySelector('.preset-panel-close');
 
-                        // 切换服务商
-                        const providerSelect = document.querySelector('.provider-select');
-                        // 老预设的 provider 可能已下线；下拉里没有就跳过，避免后续误填
-                        const hasOption = Array.from(providerSelect.options).some(o => o.value === selectedPreset.provider);
-                        if (!hasOption) {
-                            alert('该预设的服务商已不可用：' + selectedPreset.provider);
-                            return;
-                        }
-                        providerSelect.value = selectedPreset.provider;
-                        
-                        // 触发change事件以更新配置区域
-                        const event = new Event('change');
-                        providerSelect.dispatchEvent(event);
-                        
-                        // 填充配置
-                        const apiKeyElement = document.getElementById(`api-key-${selectedPreset.provider}`);
-                        const modelNameElement = document.getElementById(`model-name-${selectedPreset.provider}`);
-                        if (apiKeyElement) {
-                            apiKeyElement.value = selectedPreset.apiKey;
-                        }
-                        if (modelNameElement) {
-                            modelNameElement.value = selectedPreset.modelName;
-                        }
+    function loadPresetToUI(preset) {
+        const providerSelect = document.querySelector('.provider-select');
+        const hasOption = Array.from(providerSelect.options).some(function(o) { return o.value === preset.provider; });
+        if (!hasOption) {
+            alert('该预设的服务商已不可用：' + preset.provider);
+            return;
+        }
+        providerSelect.value = preset.provider;
+        providerSelect.dispatchEvent(new Event('change'));
 
-                        // 恢复 OCR API Key
-                        var ocrKeyElement = document.getElementById('api-key-zhipu-ocr');
-                        if (ocrKeyElement && selectedPreset.ocrApiKey) {
-                            ocrKeyElement.value = selectedPreset.ocrApiKey;
-                        }
+        var apiKeyEl = document.getElementById('api-key-' + preset.provider);
+        var modelNameEl = document.getElementById('model-name-' + preset.provider);
+        if (apiKeyEl) apiKeyEl.value = preset.apiKey || '';
+        if (modelNameEl) modelNameEl.value = preset.modelName || '';
 
-                        alert('预设加载成功！');
-                    }
-                } else {
-                    alert('没有保存的预设');
+        var ocrKeyEl = document.getElementById('api-key-zhipu-ocr');
+        if (ocrKeyEl && preset.ocrApiKey) ocrKeyEl.value = preset.ocrApiKey;
+    }
+
+    function renderPresetPanel(presets) {
+        presetPanelList.innerHTML = '';
+        if (!presets || presets.length === 0) {
+            presetPanelList.innerHTML = '<div class="preset-panel-empty">暂无保存的预设</div>';
+            return;
+        }
+        presets.slice().reverse().forEach(function(preset, i) {
+            var item = document.createElement('div');
+            item.className = 'preset-panel-item';
+
+            var info = document.createElement('div');
+            info.className = 'preset-panel-item-info';
+            var providerLabel = preset.provider;
+            info.innerHTML =
+                '<span class="preset-panel-item-provider">' + providerLabel + '</span>' +
+                '<span class="preset-panel-item-model">' + (preset.modelName || '(未设模型)') + '</span>' +
+                '<div class="preset-panel-item-date">' + new Date(preset.timestamp).toLocaleString() + '</div>';
+
+            var delBtn = document.createElement('button');
+            delBtn.className = 'preset-panel-item-delete';
+            delBtn.innerHTML = '×';
+            delBtn.title = '删除此预设';
+            delBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (confirm('确定删除该预设？')) {
+                    fetch('/api/delete-preset', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ index: presets.length - 1 - i })
+                    }).then(function(r) { return r.json(); })
+                      .then(function(d) {
+                          if (d.status === 'success') refreshPresetPanel();
+                      });
                 }
-            } catch (error) {
-                alert('获取预设列表时发生错误：' + error.message);
+            });
+
+            item.appendChild(info);
+            item.appendChild(delBtn);
+            item.addEventListener('click', function() {
+                loadPresetToUI(preset);
+            });
+            presetPanelList.appendChild(item);
+        });
+    }
+
+    function refreshPresetPanel() {
+        fetch('/api/get-presets')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'success') {
+                    renderPresetPanel(data.presets || []);
+                }
+            })
+            .catch(function() {});
+    }
+
+    if (presetListBtn && presetPanel) {
+        presetListBtn.addEventListener('click', function() {
+            var isVisible = presetPanel.style.display !== 'none';
+            if (isVisible) {
+                presetPanel.style.display = 'none';
+            } else {
+                presetPanel.style.display = 'block';
+                refreshPresetPanel();
             }
+        });
+    }
+    if (presetPanelClose) {
+        presetPanelClose.addEventListener('click', function() {
+            presetPanel.style.display = 'none';
         });
     }
 
