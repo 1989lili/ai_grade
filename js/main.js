@@ -164,15 +164,29 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // OCR 模式切换
+    (function setupOcrMode() {
+        var radios = document.querySelectorAll('input[name="ocr-mode"]');
+        var cloudDiv = document.querySelector('.ocr-cloud-key');
+        function sync() {
+            var checked = document.querySelector('input[name="ocr-mode"]:checked');
+            if (cloudDiv) cloudDiv.style.display = (checked && checked.value === 'cloud') ? 'block' : 'none';
+        }
+        radios.forEach(function(r) { r.addEventListener('change', sync); });
+        sync();
+    })();
+
     // 获取当前选中服务商的配置
     function getCurrentProviderConfig() {
         const selectedProvider = document.querySelector('.provider-select').value;
         const ocrInput = document.getElementById('api-key-zhipu-ocr');
+        const ocrModeRadio = document.querySelector('input[name="ocr-mode"]:checked');
         return {
             provider: selectedProvider,
-            apiKey: document.getElementById(`api-key-${selectedProvider}`).value,
-            modelName: document.getElementById(`model-name-${selectedProvider}`).value,
-            ocrApiKey: ocrInput ? ocrInput.value : ''
+            apiKey: document.getElementById('api-key-' + selectedProvider).value,
+            modelName: document.getElementById('model-name-' + selectedProvider).value,
+            ocrApiKey: ocrInput ? ocrInput.value : '',
+            ocrMode: ocrModeRadio ? ocrModeRadio.value : 'local'
         };
     }
 
@@ -1092,7 +1106,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         provider: config.provider,
                         apiKey: config.apiKey,
                         modelName: config.modelName,
-                        ocrApiKey: config.ocrApiKey
+                        ocrApiKey: config.ocrApiKey,
+                        ocrMode: config.ocrMode
                     })
                 });
 
@@ -1446,6 +1461,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var ocrKeyEl = document.getElementById('api-key-zhipu-ocr');
         if (ocrKeyEl && preset.ocrApiKey) ocrKeyEl.value = preset.ocrApiKey;
+        // 恢复 OCR 模式
+        if (preset.ocrMode) {
+            var modeRadio = document.querySelector('input[name="ocr-mode"][value="' + preset.ocrMode + '"]');
+            if (modeRadio) { modeRadio.checked = true; modeRadio.dispatchEvent(new Event('change')); }
+        }
     }
 
     function renderPresetPanel(presets) {
@@ -1565,10 +1585,14 @@ document.addEventListener('DOMContentLoaded', function() {
                         modelNameElement.value = preset.modelName;
                     }
 
-                    // 恢复 OCR API Key
+                    // 恢复 OCR API Key 和模式
                     var ocrKeyElement = document.getElementById('api-key-zhipu-ocr');
                     if (ocrKeyElement && preset.ocrApiKey) {
                         ocrKeyElement.value = preset.ocrApiKey;
+                    }
+                    if (preset.ocrMode) {
+                        var modeRadio = document.querySelector('input[name="ocr-mode"][value="' + preset.ocrMode + '"]');
+                        if (modeRadio) { modeRadio.checked = true; modeRadio.dispatchEvent(new Event('change')); }
                     }
                 }
             }

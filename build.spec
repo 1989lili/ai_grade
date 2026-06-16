@@ -12,11 +12,12 @@ conda_bin = os.path.join(sys.prefix, 'Library', 'bin')
 flask_datas, flask_binaries, flask_hiddenimports = collect_all('flask')
 werkzeug_datas, werkzeug_binaries, werkzeug_hiddenimports = collect_all('werkzeug')
 webview_datas, webview_binaries, webview_hiddenimports = collect_all('webview')
+rapidocr_datas, rapidocr_binaries, rapidocr_hiddenimports = collect_all('rapidocr_onnxruntime')
 
 a = Analysis(
     ['backend/launcher.py'],
     pathex=['backend'],
-    binaries=flask_binaries + werkzeug_binaries + webview_binaries + [
+    binaries=flask_binaries + werkzeug_binaries + webview_binaries + rapidocr_binaries + [
         (os.path.join(conda_bin, 'ffi.dll'), '.'),
         (os.path.join(conda_bin, 'sqlite3.dll'), '.'),
         (os.path.join(conda_bin, 'liblzma.dll'), '.'),
@@ -29,7 +30,7 @@ a = Analysis(
         ('index.html', '.'),
         ('js/main.js', 'js/'),
         ('css/style.css', 'css/'),
-    ] + flask_datas + werkzeug_datas + webview_datas,
+    ] + flask_datas + werkzeug_datas + webview_datas + rapidocr_datas,
     hiddenimports=[
         'mss',
         'mss.tools',
@@ -62,6 +63,15 @@ a = Analysis(
         'integrity',
         'grading_prompts',
         'zhipu_ocr',
+        'local_ocr',
+        'numpy',
+        'cv2',
+        'onnxruntime',
+        'onnxruntime.capi',
+        'rapidocr_onnxruntime',
+        'rapidocr_onnxruntime.ch_ppocr_v3_det',
+        'rapidocr_onnxruntime.ch_ppocr_v3_rec',
+        'rapidocr_onnxruntime.ch_ppocr_v2_cls',
         'tkinter',
         'queue',
         'flask_cors',
@@ -71,7 +81,7 @@ a = Analysis(
         'bottle',
         'proxy_tools',
         'clr_loader',
-    ] + flask_hiddenimports + werkzeug_hiddenimports + webview_hiddenimports,
+    ] + flask_hiddenimports + werkzeug_hiddenimports + webview_hiddenimports + rapidocr_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
