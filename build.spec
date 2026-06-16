@@ -61,6 +61,7 @@ a = Analysis(
         'activation_ui',
         'integrity',
         'grading_prompts',
+        'zhipu_ocr',
         'tkinter',
         'queue',
         'flask_cors',
