@@ -983,19 +983,6 @@
             transform: scale(1.02);
         }
         
-        .doubao-config-section .model-select {
-            width: 100%;
-            padding: 8px 10px;
-            font-size: 14px;
-            transition: all 0.3s ease;
-        }
-        
-        .doubao-config-section .model-select:hover {
-            border-color: #2196f3;
-            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.3);
-            transform: scale(1.02);
-        }
-        
         .one-click-add {
             background-color: #4CAF50;
             width: 100%;

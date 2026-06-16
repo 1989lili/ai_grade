@@ -1399,7 +1399,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     const presets = data.presets;
                     let presetOptions = presets.map((preset, index) => {
                         const date = new Date(preset.timestamp).toLocaleString();
-                        return `${index + 1}. ${preset.provider} - ${date}`;
+                        const model = preset.modelName || '(未设置模型)';
+                        const ocr = preset.ocrApiKey ? 'OCR已配置' : 'OCR未配置';
+                        return `${index + 1}. [${preset.provider}] ${model} — ${date} — ${ocr}`;
                     }).join('\n');
                     
                     const selectedIndex = prompt('请选择要加载的预设：\n' + presetOptions);

@@ -102,15 +102,12 @@
                             </div>
                             <div class="config-item">
                                 <label for="model-name-doubao">模型名称:</label>
-                                <input type="text" id="model-name-doubao" class="model-select"
-                                       list="doubao-model-options"
-                                       placeholder="model id 或 ep-xxx，可从火山控制台复制" />
-                                <datalist id="doubao-model-options">
+                                <select id="model-name-doubao" class="model-select">
                                     <option value="doubao-seed-1-6-flash-250715">doubao-seed-1-6-flash（速度优先 / 多模态）</option>
                                     <option value="doubao-1.5-vision-lite-250315">doubao-1.5-vision-lite（轻量多模态）</option>
                                     <option value="doubao-1.5-vision-pro-250328">doubao-1.5-vision-pro（质量优先）</option>
-                                    <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215（旧版 / 慢）</option>
-                                </datalist>
+                                    <option value="doubao-seed-2-0-pro-260215">doubao-seed-2-0-pro-260215</option>
+                                </select>
                             </div>
                         </div>
                         
