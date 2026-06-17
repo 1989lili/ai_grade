@@ -698,7 +698,7 @@ def test_model():
     data = request.json
     message = data.get('message', '')
     api_key = data.get('apiKey', '')
-    model_name = data.get('modelName', 'doubao-seedance-2.0')
+    model_name = data.get('modelName', 'doubao-seed-1-6-flash-250715')
     provider = data.get('provider', 'doubao')
 
     try:
@@ -708,13 +708,9 @@ def test_model():
         if not api_key:
             return jsonify({'response': '错误：请先配置API Key'})
 
-        if provider == 'doubao':
-            api_url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-        elif provider == 'deepseek':
-            api_url = "https://api.deepseek.com/v1/chat/completions"
-        elif provider == 'zhipu':
-            api_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-        else:
+        try:
+            api_url = get_provider_api_url(provider)
+        except GradingError:
             return jsonify({'response': '错误：不支持的服务商'})
 
         headers = {
