@@ -21,6 +21,8 @@ a = Analysis(
         (os.path.join(conda_bin, 'liblzma.dll'), '.'),
         (os.path.join(conda_bin, 'libbz2.dll'), '.'),
         (os.path.join(conda_bin, 'libexpat.dll'), '.'),
+        (os.path.join(conda_bin, 'libcrypto-3-x64.dll'), '.'),
+        (os.path.join(conda_bin, 'libssl-3-x64.dll'), '.'),
     ],
     datas=[
     ] + flask_datas + werkzeug_datas + webview_datas,

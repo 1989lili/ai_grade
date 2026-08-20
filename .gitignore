@@ -229,6 +229,7 @@ __marimo__/
 *.exe
 *.dll
 *.pyd
+presets.json
 backend/*.c
 
 # Keep project PyInstaller specs under version control
