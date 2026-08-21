@@ -935,10 +935,6 @@ def stream_analyze_card_grading(data):
         yield ndjson_event('error', code='missing_ocr_api_key',
                            message='请先在AI配置页面填写智谱 OCR API Key')
         return
-    if ocr_mode == 'vision' and not ocr_api_key:
-        yield ndjson_event('error', code='missing_vision_api_key',
-                           message='视觉直评需要智谱 API Key（用于调用 GLM-4V 视觉模型）')
-        return
 
     yield ndjson_event('status', message='已收到评分请求，正在准备截图...')
 
@@ -1030,9 +1026,9 @@ def stream_analyze_card_grading(data):
 
     # ── AI 评分（流式） ──
     if ocr_mode == 'vision':
-        # 视觉直评：一次调用完成识别+评分（智谱视觉模型）
-        model_provider, model_key, model_call = 'zhipu', ocr_api_key, vision_model_name
-        yield ndjson_event('status', message=f'正在调用 {vision_model_name} 视觉直评...')
+        # 视觉直评：一次调用完成识别+评分（直接用所选服务商的可识图模型，如 glm-4v-flash）
+        model_provider, model_key, model_call = provider, api_key, model_name
+        yield ndjson_event('status', message=f'正在调用 {model_name} 视觉直评...')
     else:
         model_provider, model_key, model_call = provider, api_key, model_name
         yield ndjson_event('status', message='OCR 完成，正在调用评分模型...')

@@ -31,77 +31,18 @@
         <div class="content">
             <!-- AI配置页面 -->
             <div id="ai-config-tab" class="tab-content">
-                <div class="model-type-section">
-                    <div class="model-type-buttons">
-                        <button class="model-type-btn active">网络模型</button>
-                        <button class="model-type-btn">本机模型</button>
-                    </div>
-                </div>
-                
-                <div class="recognition-model-section" style="display: none;">
-                    <div class="recognition-model-control">
-                        <label for="recognition-model">识别模型:</label>
-                        <select id="recognition-model" class="model-select">
-                            <option value="">请选择模型</option>
-                        </select>
-                        <button class="refresh-btn">刷新本机</button>
-                    </div>
-                </div>
-                
                 <!-- 网络评分模型 -->
                 <div class="model-params-section network-model-section">
                     <div class="model-params-header">
                         <h3>网络评分模型</h3>
-                        <div class="model-params-buttons">
-                            <button class="params-btn network-params-btn">深度分析</button>
-                            <button class="params-btn network-params-btn">测试对话</button>
-                        </div>
                     </div>
+                    
+                    <!-- 顶部提醒：视觉直评内置，需选用可识图的大模型 -->
+                    <div class="vision-tip-bar">⚠️ 请选用可识图的大模型（如智谱 glm-4v-flash、豆包 vision 系列），
+                        系统将直接对截图作答进行识别+评分（视觉直评）</div>
                     
                     <!-- 深度分析内容 -->
                     <div id="network-depth-analysis-content" class="params-content active">
-                        <!-- 识别配置（视觉直评 / 本地OCR / 智谱云端OCR） -->
-                        <div class="ocr-config-section">
-                            <h4>手写识别 <span class="ocr-required">（视觉直评默认）</span></h4>
-                            <p class="ocr-hint">视觉直评最快（一次调用识别+评分）；本地 OCR 离线可用；云端 OCR 精度最高</p>
-                            <div class="ocr-mode-toggle">
-                                <label class="ocr-mode-option">
-                                    <input type="radio" name="ocr-mode" value="vision" checked>
-                                    <span>视觉直评（快）</span>
-                                    <small>GLM-4V 一次调用识别+评分</small>
-                                </label>
-                                <label class="ocr-mode-option">
-                                    <input type="radio" name="ocr-mode" value="local">
-                                    <span>本地 OCR（离线）</span>
-                                    <small>PP-OCRv3 引擎，无需联网</small>
-                                </label>
-                                <label class="ocr-mode-option">
-                                    <input type="radio" name="ocr-mode" value="cloud">
-                                    <span>智谱云端 OCR（准）</span>
-                                    <small>需智谱 API Key</small>
-                                </label>
-                            </div>
-                            <div class="config-item vision-model-item">
-                                <label for="vision-model-name">视觉模型:</label>
-                                <input type="text" id="vision-model-name" class="model-select"
-                                       list="vision-model-list" autocomplete="off"
-                                       placeholder="glm-4v-flash（默认）">
-                                <datalist id="vision-model-list">
-                                    <option value="glm-4v-flash">
-                                    <option value="glm-4v-plus">
-                                </datalist>
-                            </div>
-                            <div class="config-item">
-                                <label for="api-key-zhipu-ocr">智谱 API Key:</label>
-                                <div class="api-key-input">
-                                    <input type="password" id="api-key-zhipu-ocr"
-                                           placeholder="智谱 API Key（形如 xxxxxx.xxxxxx）">
-                                    <button class="eye-btn">👁️</button>
-                                </div>
-                            </div>
-                            <p class="ocr-hint" id="ocr-mode-tip">视觉直评使用智谱 GLM-4V 视觉模型，需配置智谱 API Key</p>
-                        </div>
-
                         <div class="service-provider-container">
                             <div class="service-provider-section">
                                 <div class="service-provider-select">
@@ -196,61 +137,6 @@
                                     <button class="preset-panel-close" id="preset-panel-close">×</button>
                                 </div>
                                 <div class="preset-panel-list" id="preset-panel-list"></div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- 测试对话内容 -->
-                    <div id="network-test-dialog-content" class="params-content">
-                        <div class="analysis-container">
-                            <div class="chat-container">
-                                <!-- 聊天内容将显示在这里 -->
-                            </div>
-                        </div>
-                        <div class="analysis-container">
-                            <div class="analysis-input">
-                                <input type="text" placeholder="请输入测试内容">
-                                <button class="send-test-btn network-send-test-btn">发送测试</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 本机评分模型 -->
-                <div class="model-params-section local-model-section" style="display: none;">
-                    <div class="model-params-header">
-                        <h3>本机评分模型</h3>
-                        <div class="model-params-buttons">
-                            <button class="params-btn local-params-btn">深度分析</button>
-                            <button class="params-btn local-params-btn">测试对话</button>
-                        </div>
-                    </div>
-                    
-                    <!-- 深度分析内容 -->
-                    <div id="local-depth-analysis-content" class="params-content active">
-                        <div class="local-model-config">
-                            <h4>本机模型配置</h4>
-                            <div class="config-item">
-                                <label for="local-model-name">模型名称:</label>
-                                <select id="local-model-name" class="model-select">
-                                    <option value="local1">本机识别模型1</option>
-                                    <option value="local2">本机识别模型2</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- 测试对话内容 -->
-                    <div id="local-test-dialog-content" class="params-content">
-                        <div class="analysis-container">
-                            <div class="chat-container">
-                                <!-- 聊天内容将显示在这里 -->
-                            </div>
-                        </div>
-                        <div class="analysis-container">
-                            <div class="analysis-input">
-                                <input type="text" placeholder="请输入测试内容">
-                                <button class="send-test-btn local-send-test-btn">发送测试</button>
                             </div>
                         </div>
                     </div>

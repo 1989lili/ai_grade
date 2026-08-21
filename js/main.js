@@ -164,41 +164,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 获取当前选中服务商的配置
+    // 获取当前选中服务商的配置（视觉直评内置，直接用服务商配置一次调用识别+评分）
     function getCurrentProviderConfig() {
         const selectedProvider = document.querySelector('.provider-select').value;
-        const ocrInput = document.getElementById('api-key-zhipu-ocr');
-        const ocrModeInput = document.querySelector('input[name="ocr-mode"]:checked');
-        const visionModelInput = document.getElementById('vision-model-name');
         return {
             provider: selectedProvider,
             apiKey: document.getElementById(`api-key-${selectedProvider}`).value,
-            modelName: document.getElementById(`model-name-${selectedProvider}`).value,
-            ocrApiKey: ocrInput ? ocrInput.value : '',
-            ocrMode: ocrModeInput ? ocrModeInput.value : 'vision',
-            visionModelName: visionModelInput ? visionModelInput.value : ''
+            modelName: document.getElementById(`model-name-${selectedProvider}`).value
         };
     }
-
-    // 识别方式切换：视觉直评显示视觉模型选择，本地/云端切换提示文案
-    (function setupOcrMode() {
-        var radios = document.querySelectorAll('input[name="ocr-mode"]');
-        var visionItem = document.querySelector('.vision-model-item');
-        var tip = document.getElementById('ocr-mode-tip');
-        var tips = {
-            vision: '视觉直评使用智谱 GLM-4V 视觉模型，需配置智谱 API Key',
-            local: '本地 OCR 离线识别（PP-OCRv3），无需配置 API Key',
-            cloud: '云端 OCR 精度最高，需配置智谱 API Key'
-        };
-        function sync() {
-            var checked = document.querySelector('input[name="ocr-mode"]:checked');
-            var mode = checked ? checked.value : 'vision';
-            if (visionItem) visionItem.style.display = (mode === 'vision') ? 'block' : 'none';
-            if (tip) tip.textContent = tips[mode] || tips.vision;
-        }
-        radios.forEach(function(r) { r.addEventListener('change', sync); });
-        sync();
-    })();
 
     // 评分标准页面功能
     const scoringStandardTab = document.getElementById('scoring-standard-tab');
@@ -539,157 +513,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 初始化进度条
     updateProgress();
-
-    // 初始化模型列表
-    async function initModels() {
-        try {
-            const response = await fetch('/api/models');
-            const models = await response.json();
-            const modelSelect = document.getElementById('recognition-model');
-            if (modelSelect) {
-                modelSelect.innerHTML = '<option value="">请选择模型</option>';
-                models.forEach(model => {
-                    const option = document.createElement('option');
-                    option.value = model.id;
-                    option.textContent = model.name;
-                    modelSelect.appendChild(option);
-                });
-            }
-        } catch (error) {
-            console.error('Error loading models:', error);
-        }
-    }
-
-    // 测试模型
-    function setupTestModel() {
-        // 网络模型测试对话
-        const networkSendTestBtn = document.querySelector('.network-send-test-btn');
-        const networkChatContainer = document.querySelector('#network-test-dialog-content .chat-container');
-        const networkInput = document.querySelector('#network-test-dialog-content .analysis-input input');
-        
-        if (networkSendTestBtn && networkChatContainer && networkInput) {
-            // 发送测试消息的函数
-            const sendNetworkMessage = async () => {
-                const message = networkInput.value.trim();
-                if (message) {
-                    // 清空输入框（立即清空，无论成功失败）
-                    networkInput.value = '';
-                    
-                    // 添加用户消息
-                    const userMessage = document.createElement('div');
-                    userMessage.style.margin = '10px';
-                    userMessage.style.padding = '10px';
-                    userMessage.style.backgroundColor = '#e3f2fd';
-                    userMessage.style.borderRadius = '5px';
-                    userMessage.textContent = `用户: ${message}`;
-                    networkChatContainer.appendChild(userMessage);
-                    
-                    // 发送请求到后端
-                    try {
-                        // 获取当前选中服务商的配置
-                        const config = getCurrentProviderConfig();
-                        
-                        const response = await fetch('/api/test-model', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ message, apiKey: config.apiKey, modelName: config.modelName, provider: config.provider })
-                        });
-                        const data = await response.json();
-                        
-                        // 添加模型响应
-                        const modelMessage = document.createElement('div');
-                        modelMessage.style.margin = '10px';
-                        modelMessage.style.padding = '10px';
-                        modelMessage.style.backgroundColor = '#f3e5f5';
-                        modelMessage.style.borderRadius = '5px';
-                        modelMessage.textContent = `模型: ${data.response}`;
-                        networkChatContainer.appendChild(modelMessage);
-                        
-                        // 滚动到底部
-                        networkChatContainer.scrollTop = networkChatContainer.scrollHeight;
-                    } catch (error) {
-                        console.error('Error testing network model:', error);
-                    }
-                }
-            };
-            
-            // 按钮点击事件
-            networkSendTestBtn.addEventListener('click', sendNetworkMessage);
-            
-            // 键盘事件：Enter键发送消息
-            networkInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    sendNetworkMessage();
-                }
-            });
-        }
-        
-        // 本机模型测试对话
-        const localSendTestBtn = document.querySelector('.local-send-test-btn');
-        const localChatContainer = document.querySelector('#local-test-dialog-content .chat-container');
-        const localInput = document.querySelector('#local-test-dialog-content .analysis-input input');
-        
-        if (localSendTestBtn && localChatContainer && localInput) {
-            // 发送测试消息的函数
-            const sendLocalMessage = async () => {
-                const message = localInput.value.trim();
-                if (message) {
-                    // 清空输入框（立即清空，无论成功失败）
-                    localInput.value = '';
-                    
-                    // 添加用户消息
-                    const userMessage = document.createElement('div');
-                    userMessage.style.margin = '10px';
-                    userMessage.style.padding = '10px';
-                    userMessage.style.backgroundColor = '#e3f2fd';
-                    userMessage.style.borderRadius = '5px';
-                    userMessage.textContent = `用户: ${message}`;
-                    localChatContainer.appendChild(userMessage);
-                    
-                    // 发送请求到后端
-                    try {
-                        // 获取本机模型配置
-                        const localModelName = document.getElementById('local-model-name').value;
-                        
-                        const response = await fetch('/api/test-model', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ message, modelName: localModelName, provider: 'local' })
-                        });
-                        const data = await response.json();
-                        
-                        // 添加模型响应
-                        const modelMessage = document.createElement('div');
-                        modelMessage.style.margin = '10px';
-                        modelMessage.style.padding = '10px';
-                        modelMessage.style.backgroundColor = '#f3e5f5';
-                        modelMessage.style.borderRadius = '5px';
-                        modelMessage.textContent = `模型: ${data.response}`;
-                        localChatContainer.appendChild(modelMessage);
-                        
-                        // 滚动到底部
-                        localChatContainer.scrollTop = localChatContainer.scrollHeight;
-                    } catch (error) {
-                        console.error('Error testing local model:', error);
-                    }
-                }
-            };
-            
-            // 按钮点击事件
-            localSendTestBtn.addEventListener('click', sendLocalMessage);
-            
-            // 键盘事件：Enter键发送消息
-            localInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    sendLocalMessage();
-                }
-            });
-        }
-    }
 
     // 标记按钮 — 通过 Python API 控制外部 Win32 半透明蒙层
     const markingBtns = document.querySelectorAll('.marking-btn:not(.one-click-add)');
@@ -1115,10 +938,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         standards: scoringStandards,
                         provider: config.provider,
                         apiKey: config.apiKey,
-                        modelName: config.modelName,
-                        ocrApiKey: config.ocrApiKey,
-                        ocrMode: config.ocrMode,
-                        visionModelName: config.visionModelName
+                        modelName: config.modelName
                     })
                 });
 
@@ -1346,85 +1166,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // AI配置页面的参数按钮切换功能
-    const paramsBtns = document.querySelectorAll('.params-btn');
-    const paramsContents = document.querySelectorAll('.params-content');
-
-    paramsBtns.forEach((btn, index) => {
-        btn.addEventListener('click', function() {
-            // 检查当前按钮是否已经是active状态
-            const isActive = this.classList.contains('active');
-            
-            if (index === 0) {
-                // 深度分析按钮：只切换自身样式
-                this.classList.toggle('active');
-            } else if (index === 1) {
-                // 测试对话按钮：切换页面
-                if (isActive) {
-                    // 取消选中，切换回API配置界面
-                    this.classList.remove('active');
-                    this.textContent = '测试对话';
-                    // 显示深度分析内容
-                    paramsContents.forEach(content => content.classList.remove('active'));
-                    if (paramsContents[0]) {
-                        paramsContents[0].classList.add('active');
-                    }
-                } else {
-                    // 选中，切换到对话测试页面
-                    this.classList.add('active');
-                    this.textContent = '结束对话';
-                    // 显示测试对话内容
-                    paramsContents.forEach(content => content.classList.remove('active'));
-                    if (paramsContents[1]) {
-                        paramsContents[1].classList.add('active');
-                    }
-                }
-            }
-        });
-    });
-
-    // 模型类型选择功能
-    const modelTypeBtns = document.querySelectorAll('.model-type-btn');
-    const recognitionModelSelect = document.getElementById('recognition-model');
-    const recognitionModelSection = document.querySelector('.recognition-model-section');
-    const networkModelSection = document.querySelector('.network-model-section');
-    const localModelSection = document.querySelector('.local-model-section');
-
-    modelTypeBtns.forEach((btn, index) => {
-        btn.addEventListener('click', function() {
-            // 移除所有按钮的active类
-            modelTypeBtns.forEach(b => b.classList.remove('active'));
-            // 添加当前按钮的active类
-            this.classList.add('active');
-            
-            // 清空识别模型选择框
-            recognitionModelSelect.innerHTML = '';
-            
-            if (index === 0) { // 网络模型
-                // 显示网络评分模型，隐藏识别模型和本机评分模型
-                networkModelSection.style.display = 'block';
-                recognitionModelSection.style.display = 'none';
-                localModelSection.style.display = 'none';
-            } else { // 本机模型
-                // 显示识别模型和本机评分模型，隐藏网络评分模型
-                recognitionModelSection.style.display = 'block';
-                localModelSection.style.display = 'block';
-                networkModelSection.style.display = 'none';
-                
-                // 添加本机模型选项
-                const option1 = document.createElement('option');
-                option1.value = 'local1';
-                option1.textContent = '本机识别模型1';
-                recognitionModelSelect.appendChild(option1);
-                
-                const option2 = document.createElement('option');
-                option2.value = 'local2';
-                option2.textContent = '本机识别模型2';
-                recognitionModelSelect.appendChild(option2);
-            }
-        });
-    });
-
     // 保存预设功能
     const savePresetBtn = document.querySelector('.save-preset-btn');
     if (savePresetBtn) {
@@ -1482,18 +1223,6 @@ document.addEventListener('DOMContentLoaded', function() {
         var modelNameEl = document.getElementById('model-name-' + preset.provider);
         if (apiKeyEl) apiKeyEl.value = preset.apiKey || '';
         if (modelNameEl) modelNameEl.value = preset.modelName || '';
-
-        var ocrKeyEl = document.getElementById('api-key-zhipu-ocr');
-        if (ocrKeyEl && preset.ocrApiKey) ocrKeyEl.value = preset.ocrApiKey;
-
-        // 恢复识别方式与视觉模型
-        var ocrModeEl = document.querySelector('input[name="ocr-mode"][value="' + (preset.ocrMode || 'vision') + '"]');
-        if (ocrModeEl) {
-            ocrModeEl.checked = true;
-            ocrModeEl.dispatchEvent(new Event('change'));
-        }
-        var visionModelEl = document.getElementById('vision-model-name');
-        if (visionModelEl && preset.visionModelName) visionModelEl.value = preset.visionModelName;
     }
 
     function renderPresetPanel(presets) {
@@ -1612,23 +1341,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (modelNameElement) {
                         modelNameElement.value = preset.modelName;
                     }
-
-                    // 恢复 OCR API Key
-                    var ocrKeyElement = document.getElementById('api-key-zhipu-ocr');
-                    if (ocrKeyElement && preset.ocrApiKey) {
-                        ocrKeyElement.value = preset.ocrApiKey;
-                    }
-
-                    // 恢复识别方式与视觉模型
-                    var ocrModeEl2 = document.querySelector('input[name="ocr-mode"][value="' + (preset.ocrMode || 'vision') + '"]');
-                    if (ocrModeEl2) {
-                        ocrModeEl2.checked = true;
-                        ocrModeEl2.dispatchEvent(new Event('change'));
-                    }
-                    var visionModelEl2 = document.getElementById('vision-model-name');
-                    if (visionModelEl2 && preset.visionModelName) {
-                        visionModelEl2.value = preset.visionModelName;
-                    }
                 }
             }
         } catch (error) {
@@ -1637,6 +1349,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // 初始化
-    initModels();
-    setupTestModel();
 });
