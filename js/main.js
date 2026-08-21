@@ -168,13 +168,37 @@ document.addEventListener('DOMContentLoaded', function() {
     function getCurrentProviderConfig() {
         const selectedProvider = document.querySelector('.provider-select').value;
         const ocrInput = document.getElementById('api-key-zhipu-ocr');
+        const ocrModeInput = document.querySelector('input[name="ocr-mode"]:checked');
+        const visionModelInput = document.getElementById('vision-model-name');
         return {
             provider: selectedProvider,
             apiKey: document.getElementById(`api-key-${selectedProvider}`).value,
             modelName: document.getElementById(`model-name-${selectedProvider}`).value,
-            ocrApiKey: ocrInput ? ocrInput.value : ''
+            ocrApiKey: ocrInput ? ocrInput.value : '',
+            ocrMode: ocrModeInput ? ocrModeInput.value : 'vision',
+            visionModelName: visionModelInput ? visionModelInput.value : ''
         };
     }
+
+    // 识别方式切换：视觉直评显示视觉模型选择，本地/云端切换提示文案
+    (function setupOcrMode() {
+        var radios = document.querySelectorAll('input[name="ocr-mode"]');
+        var visionItem = document.querySelector('.vision-model-item');
+        var tip = document.getElementById('ocr-mode-tip');
+        var tips = {
+            vision: '视觉直评使用智谱 GLM-4V 视觉模型，需配置智谱 API Key',
+            local: '本地 OCR 离线识别（PP-OCRv3），无需配置 API Key',
+            cloud: '云端 OCR 精度最高，需配置智谱 API Key'
+        };
+        function sync() {
+            var checked = document.querySelector('input[name="ocr-mode"]:checked');
+            var mode = checked ? checked.value : 'vision';
+            if (visionItem) visionItem.style.display = (mode === 'vision') ? 'block' : 'none';
+            if (tip) tip.textContent = tips[mode] || tips.vision;
+        }
+        radios.forEach(function(r) { r.addEventListener('change', sync); });
+        sync();
+    })();
 
     // 评分标准页面功能
     const scoringStandardTab = document.getElementById('scoring-standard-tab');
@@ -1092,7 +1116,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         provider: config.provider,
                         apiKey: config.apiKey,
                         modelName: config.modelName,
-                        ocrApiKey: config.ocrApiKey
+                        ocrApiKey: config.ocrApiKey,
+                        ocrMode: config.ocrMode,
+                        visionModelName: config.visionModelName
                     })
                 });
 
@@ -1124,9 +1150,22 @@ document.addEventListener('DOMContentLoaded', function() {
                         analyzeTimings.__ocr_text = event.text || '';
                         return;
                     }
+                    if (event.type === 'ocr_text_chunk') {
+                        // 识别文本逐行实时上屏（打字机效果）
+                        if (!analyzeTimings.__ocr_typewriter) {
+                            analyzeTimings.__ocr_typewriter = true;
+                            appendStreamContent('\n【识别文本】\n');
+                        }
+                        if (event.line) appendStreamContent(event.line + '\n');
+                        return;
+                    }
                     if (event.type === 'timing') {
                         // 后端埋点的耗时事件：capture / model_first_byte / model_call / parse
                         analyzeTimings[event.key] = event.duration_ms;
+                        // 截图完成 → 扫描边框闪烁反馈"采集完成"
+                        if (event.key === 'capture' && api && api.scan_flash) {
+                            api.scan_flash(2);
+                        }
                         return;
                     }
                     if (event.type === 'final') {
@@ -1446,6 +1485,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var ocrKeyEl = document.getElementById('api-key-zhipu-ocr');
         if (ocrKeyEl && preset.ocrApiKey) ocrKeyEl.value = preset.ocrApiKey;
+
+        // 恢复识别方式与视觉模型
+        var ocrModeEl = document.querySelector('input[name="ocr-mode"][value="' + (preset.ocrMode || 'vision') + '"]');
+        if (ocrModeEl) {
+            ocrModeEl.checked = true;
+            ocrModeEl.dispatchEvent(new Event('change'));
+        }
+        var visionModelEl = document.getElementById('vision-model-name');
+        if (visionModelEl && preset.visionModelName) visionModelEl.value = preset.visionModelName;
     }
 
     function renderPresetPanel(presets) {
@@ -1569,6 +1617,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     var ocrKeyElement = document.getElementById('api-key-zhipu-ocr');
                     if (ocrKeyElement && preset.ocrApiKey) {
                         ocrKeyElement.value = preset.ocrApiKey;
+                    }
+
+                    // 恢复识别方式与视觉模型
+                    var ocrModeEl2 = document.querySelector('input[name="ocr-mode"][value="' + (preset.ocrMode || 'vision') + '"]');
+                    if (ocrModeEl2) {
+                        ocrModeEl2.checked = true;
+                        ocrModeEl2.dispatchEvent(new Event('change'));
+                    }
+                    var visionModelEl2 = document.getElementById('vision-model-name');
+                    if (visionModelEl2 && preset.visionModelName) {
+                        visionModelEl2.value = preset.visionModelName;
                     }
                 }
             }

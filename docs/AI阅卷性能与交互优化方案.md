@@ -1,6 +1,6 @@
 # AI 阅卷性能与交互优化方案
 
-> 状态：待实施　|　日期：2026-08-20　|　目标：单次阅卷响应 ≤10s、客户端打包 ≤150MB、交互体验对标竞品
+> 状态：已实施 ✅　|　日期：2026-08-20 制定，2026-08-21 实施　|　目标：单次阅卷响应 ≤10s、客户端打包 ≤150MB、交互体验对标竞品
 
 ## 1. 背景与目标
 
@@ -142,3 +142,35 @@
 3. **onnxruntime 兼容性**：需在 Win7~Win11 实测（onnxruntime 较新版本可能要求更高系统版本）；
 4. **onedir 迁移影响**：完整性校验（integrity.py）与资源路径解析需适配 onedir 目录结构，回归测试启动/升级流程；
 5. **预设/配置兼容**：新增识别方式配置需兼容旧预设文件（缺省字段走默认值）。
+
+## 8. 实测验证结果（2026-08-21）
+
+### 8.1 响应时间（打包版 exe 实测，DeepSeek 评分）
+
+| 路径 | 截图 | 本地OCR | 模型首响 | 评分完成 | 总耗时 | 结论 |
+|------|------|---------|----------|----------|--------|------|
+| local 首次（含模型加载） | 0.25s | 5.0s | 0.9s | 1.6s | **6.9s** | ✅ ≤10s |
+| local 第二次（模型已加载） | 0.08s | 1.5s | 0.9s | 1.6s | **3.2s** | ✅ ≤10s |
+| 打包版 local 全链路 | 0.09s | 1.9s | 0.9s | 1.9s | **4.0s** | ✅ ≤10s |
+
+- **deepseek-v4-flash 推理模型坑**：默认只输出 reasoning 无 content，导致 30s+ 后报 model_empty_response；已通过 payload 加 `"thinking": {"type": "disabled"}` 修复（实测 1.1s 返回）。
+- **cloud 熔断**：OCR_READ_TIMEOUT=6s，云端超时/网络异常自动降级本地 OCR（错误码全覆盖验证 ✅）；key 无效时快速报错不降级（265ms，明确提示用户 ✅）。
+
+### 8.2 打包体积（onedir + UPX）
+
+| 项 | 体积 | 说明 |
+|----|------|------|
+| 打包前（onefile 全量） | 263.3MB | cv2 111.8MB（含 ffmpeg 29.4MB） |
+| onedir + 删 ffmpeg + UPX | **116.7MB** | ✅ ≤150MB，cv2 压缩至 20.4MB |
+
+**踩坑记录：**
+1. **onnxruntime DLL 初始化失败**：PyInstaller 收集到旧版 VC 运行库（vcruntime 14.36）与新版（14.44）混用 → 修复：spec 中统一从 conda 根目录打包全套 14.44 VC 运行库（过滤旧版后显式添加）；
+2. **SSL 缺失**：打包版 https 请求依赖 libcrypto/libssl DLL，需在 binaries 显式加入（否则 deepseek/智谱 API 全失败）；
+3. **UPX 需 --upx-dir 指定**（spec 内改 PATH 不生效，configure 阶段先于 spec 执行）；upx.exe 已下载至 tools/upx/；
+4. **a.binaries 过滤/追加需用 3 元组 TOC**（dest_name, src_name, 'BINARY'），2 元组会导致 COLLECT 解包失败；
+5. rapidocr_onnxruntime 1.4.x 模型在 `models/`（PP-OCRv4），旧 v3 hiddenimports 名称不存在需移除；模型路径基于 `__file__` 相对解析，onedir 下自动兼容。
+
+### 8.3 待办
+
+- vision（GLM-4V）真实链路测试：需要有效智谱 API Key（前端校验、错误码已验证）；
+- 多评模式（同卷评 2 次取均值）后续版本可加。

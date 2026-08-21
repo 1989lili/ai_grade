@@ -868,6 +868,43 @@
             margin: 0 0 10px 0;
         }
 
+        /* 识别方式切换（视觉直评 / 本地OCR / 智谱云端OCR） */
+        .ocr-mode-toggle {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        .ocr-mode-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            background: #fff;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .ocr-mode-option:hover {
+            border-color: #4CAF50;
+        }
+        .ocr-mode-option:has(input:checked) {
+            border-color: #4CAF50;
+            background: #e8f5e9;
+        }
+        .ocr-mode-option input[type="radio"] {
+            margin: 0;
+            accent-color: #4CAF50;
+        }
+        .ocr-mode-option small {
+            color: #999;
+            font-size: 11px;
+        }
+        .vision-model-item {
+            margin-bottom: 10px;
+        }
+
         /* 服务商配置区块共用 */
         .provider-config {
             margin-bottom: 20px;

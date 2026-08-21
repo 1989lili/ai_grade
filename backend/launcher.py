@@ -260,39 +260,149 @@ class TkMarker:
 
 
 class TkScanLine:
-    """答题卡区域扫描线动画。支持单次扫描和循环扫描两种模式。"""
+    """答题卡区域扫描线动画。支持单次扫描和循环扫描两种模式。
+
+    增强：
+    - 渐变光带：9 层窗口叠加（深青→亮青→白→亮青→深青）模拟渐变扫描线
+    - 正弦缓动：起止减速，消除匀速机械感
+    - 完成反馈：单次扫描结束时区域边框高亮闪烁一次（与截图动作联动）
+    - 速度自适应：大区域自动提高每帧移动量，视觉速度均匀
+    """
+
+    # 光带分层：(颜色, 高度px)，中心亮白两侧渐深，总高 25px
+    _BAND = [
+        ('#004d66', 1),
+        ('#008899', 2),
+        ('#00c2d6', 3),
+        ('#00e6f2', 4),
+        ('#e6ffff', 5),
+        ('#00f2fe', 4),
+        ('#00c2d6', 3),
+        ('#008899', 2),
+        ('#004d66', 1),
+    ]
+    _BAND_H = sum(h for _, h in _BAND)
+    _FRAME_COLOR = '#00f2fe'
+    _FRAME_BORDER = 3
 
     def __init__(self, root):
         import tkinter as tk
         self._root = root
-        self._win = tk.Toplevel(root)
-        self._win.overrideredirect(True)
-        self._win.attributes('-topmost', True)
-        self._win.attributes('-toolwindow', True)
-        self._win.configure(bg='#00f2fe')
-        self._win.withdraw()
+        self._band_wins = []  # [(Toplevel, height)]
+        self._frame_wins = {}  # part -> Toplevel（边框闪烁用）
         self._job = None
+        self._flash_job = None
         self._looping = False
+        self._rect = (0, 0, 0, 0)  # (x, y, w, h) 供边框闪烁使用
+
+        for color, height in self._BAND:
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.attributes('-topmost', True)
+            win.attributes('-toolwindow', True)
+            win.configure(bg=color)
+            win.withdraw()
+            self._band_wins.append((win, height))
+
+        for part in ('top', 'bottom', 'left', 'right'):
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.attributes('-topmost', True)
+            win.attributes('-toolwindow', True)
+            win.configure(bg=self._FRAME_COLOR)
+            win.withdraw()
+            self._frame_wins[part] = win
+
+    @staticmethod
+    def _ease(ratio):
+        """正弦缓动：0→1 先加速后减速。"""
+        import math
+        ratio = min(1.0, max(0.0, ratio))
+        return 0.5 - 0.5 * math.cos(ratio * math.pi)
+
+    def _adaptive_duration(self, h, duration_ms):
+        """大区域自动提速（减少总时长），小区域略微放慢，视觉速度均匀。"""
+        duration_ms = max(200, int(duration_ms))
+        if h > 900:
+            return int(duration_ms * 0.7)
+        if h < 200:
+            return int(duration_ms * 1.2)
+        return duration_ms
+
+    def _layout_band(self, x, y, w, line_y):
+        """在 line_y 位置铺开渐变光带窗口。"""
+        band_top = line_y
+        for win, height in self._band_wins:
+            win.geometry(f'{max(1, w)}x{height}+{x}+{band_top}')
+            band_top += height
+
+    def _show_band(self):
+        for win, _ in self._band_wins:
+            win.deiconify()
+            win.lift()
+
+    def _hide_band(self):
+        for win, _ in self._band_wins:
+            win.withdraw()
+
+    def _show_frame(self):
+        x, y, w, h = self._rect
+        if w <= 0 or h <= 0:
+            return
+        b = self._FRAME_BORDER
+        self._frame_wins['top'].geometry(f'{w}x{b}+{x}+{y}')
+        self._frame_wins['bottom'].geometry(f'{w}x{b}+{x}+{y + h - b}')
+        self._frame_wins['left'].geometry(f'{b}x{h}+{x}+{y}')
+        self._frame_wins['right'].geometry(f'{b}x{h}+{x + w - b}+{y}')
+        for win in self._frame_wins.values():
+            win.deiconify()
+            win.lift()
+
+    def _hide_frame(self):
+        for win in self._frame_wins.values():
+            win.withdraw()
+
+    def _flash_frame(self, times=2, interval_ms=70):
+        """边框高亮闪烁 times 次（亮→灭→亮→灭），用于扫描完成的采集反馈。"""
+        if self._flash_job:
+            try:
+                self._root.after_cancel(self._flash_job)
+            except Exception:
+                pass
+            self._flash_job = None
+
+        def blink(count):
+            if count >= times * 2:
+                self._hide_frame()
+                self._flash_job = None
+                return
+            if count % 2 == 0:
+                self._show_frame()
+            else:
+                self._hide_frame()
+            self._flash_job = self._root.after(interval_ms, blink, count + 1)
+
+        blink(0)
 
     def start(self, x, y, w, h, duration_ms=900):
-        """单次扫描，扫完自动隐藏。"""
+        """单次扫描，扫完边框闪烁反馈后自动隐藏。"""
         self.hide()
         x, y, w, h = int(x), int(y), int(w), int(h)
-        duration_ms = max(200, int(duration_ms))
-        line_h = 4
-        frames = max(12, duration_ms // 16)
+        self._rect = (x, y, w, h)
+        duration_ms = self._adaptive_duration(h, duration_ms)
+        frames = max(20, duration_ms // 16)
         step = 0
 
         def draw():
             nonlocal step
             if step > frames:
-                self.hide()
+                self._hide_band()
+                self._flash_frame()
                 return
-            ratio = step / frames
-            line_y = y + int(max(0, h - line_h) * ratio)
-            self._win.geometry(f'{max(1, w)}x{line_h}+{x}+{line_y}')
-            self._win.deiconify()
-            self._win.lift()
+            ratio = self._ease(step / frames)
+            line_y = y + int(max(0, h - self._BAND_H) * ratio)
+            self._layout_band(x, y, w, line_y)
+            self._show_band()
             step += 1
             self._job = self._root.after(max(1, duration_ms // frames), draw)
 
@@ -302,9 +412,9 @@ class TkScanLine:
         """循环扫描，直到调用 hide() 才停止。"""
         self.hide()
         x, y, w, h = int(x), int(y), int(w), int(h)
-        duration_ms = max(200, int(duration_ms))
-        line_h = 4
-        frames = max(12, duration_ms // 16)
+        self._rect = (x, y, w, h)
+        duration_ms = self._adaptive_duration(h, duration_ms)
+        frames = max(20, duration_ms // 16)
         self._looping = True
         step = 0
 
@@ -314,11 +424,10 @@ class TkScanLine:
                 return
             if step > frames:
                 step = 0  # 回到顶部继续循环
-            ratio = step / frames
-            line_y = y + int(max(0, h - line_h) * ratio)
-            self._win.geometry(f'{max(1, w)}x{line_h}+{x}+{line_y}')
-            self._win.deiconify()
-            self._win.lift()
+            ratio = self._ease(step / frames)
+            line_y = y + int(max(0, h - self._BAND_H) * ratio)
+            self._layout_band(x, y, w, line_y)
+            self._show_band()
             step += 1
             self._job = self._root.after(max(1, duration_ms // frames), draw)
 
@@ -331,12 +440,30 @@ class TkScanLine:
             except Exception:
                 pass
             self._job = None
+        if self._flash_job:
+            try:
+                self._root.after_cancel(self._flash_job)
+            except Exception:
+                pass
+            self._flash_job = None
         self._looping = False
-        self._win.withdraw()
+        self._hide_band()
+        self._hide_frame()
 
     def destroy(self):
         self.hide()
-        self._win.destroy()
+        for win, _ in self._band_wins:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        for win in self._frame_wins.values():
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        self._band_wins.clear()
+        self._frame_wins.clear()
 
     def _destroy(self):
         self.destroy()
@@ -378,6 +505,11 @@ def _tk_marker_main(markers_out, ready_event):
                     scan_line = markers_out.get('_scan_line')
                     if scan_line:
                         scan_line.start_loop(x, y, w, h, duration_ms)
+                elif action == 'scan_flash':
+                    _, times = cmd
+                    scan_line = markers_out.get('_scan_line')
+                    if scan_line:
+                        scan_line._flash_frame(times)
                 elif action == 'hide_scan':
                     scan_line = markers_out.get('_scan_line')
                     if scan_line:
@@ -571,6 +703,10 @@ class WindowApi:
 
     def hide_scan_line(self):
         _marker_queue.put(('hide_scan',))
+
+    def scan_flash(self, times=2):
+        """截图完成后触发边框高亮闪烁，作为"采集完成"反馈。"""
+        _marker_queue.put(('scan_flash', max(1, int(times))))
 
     def get_marker_rect(self, mtype):
         m = self._markers.get(mtype)

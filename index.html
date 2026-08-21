@@ -60,10 +60,37 @@
                     
                     <!-- 深度分析内容 -->
                     <div id="network-depth-analysis-content" class="params-content active">
-                        <!-- 智谱 OCR 配置（所有 provider 共用） -->
+                        <!-- 识别配置（视觉直评 / 本地OCR / 智谱云端OCR） -->
                         <div class="ocr-config-section">
-                            <h4>智谱 GLM-OCR 识别 <span class="ocr-required">（必填）</span></h4>
-                            <p class="ocr-hint">所有服务商批改前都会先调用智谱 GLM-OCR 识别手写文字</p>
+                            <h4>手写识别 <span class="ocr-required">（视觉直评默认）</span></h4>
+                            <p class="ocr-hint">视觉直评最快（一次调用识别+评分）；本地 OCR 离线可用；云端 OCR 精度最高</p>
+                            <div class="ocr-mode-toggle">
+                                <label class="ocr-mode-option">
+                                    <input type="radio" name="ocr-mode" value="vision" checked>
+                                    <span>视觉直评（快）</span>
+                                    <small>GLM-4V 一次调用识别+评分</small>
+                                </label>
+                                <label class="ocr-mode-option">
+                                    <input type="radio" name="ocr-mode" value="local">
+                                    <span>本地 OCR（离线）</span>
+                                    <small>PP-OCRv3 引擎，无需联网</small>
+                                </label>
+                                <label class="ocr-mode-option">
+                                    <input type="radio" name="ocr-mode" value="cloud">
+                                    <span>智谱云端 OCR（准）</span>
+                                    <small>需智谱 API Key</small>
+                                </label>
+                            </div>
+                            <div class="config-item vision-model-item">
+                                <label for="vision-model-name">视觉模型:</label>
+                                <input type="text" id="vision-model-name" class="model-select"
+                                       list="vision-model-list" autocomplete="off"
+                                       placeholder="glm-4v-flash（默认）">
+                                <datalist id="vision-model-list">
+                                    <option value="glm-4v-flash">
+                                    <option value="glm-4v-plus">
+                                </datalist>
+                            </div>
                             <div class="config-item">
                                 <label for="api-key-zhipu-ocr">智谱 API Key:</label>
                                 <div class="api-key-input">
@@ -72,6 +99,7 @@
                                     <button class="eye-btn">👁️</button>
                                 </div>
                             </div>
+                            <p class="ocr-hint" id="ocr-mode-tip">视觉直评使用智谱 GLM-4V 视觉模型，需配置智谱 API Key</p>
                         </div>
 
                         <div class="service-provider-container">
