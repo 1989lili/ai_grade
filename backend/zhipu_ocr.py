@@ -77,9 +77,9 @@ def call_handwriting_ocr(api_key, image_bytes, mime_type='image/jpeg',
     except ValueError as exc:
         raise OCRError('OCR 响应非 JSON', code='ocr_invalid_json') from exc
 
-    # 智谱 OCR 失败时通常返回 status != 'success' 或 message 为非空错误
+    # 智谱 OCR 失败时通常返回 status != 'succeeded' 或 message 为非空错误
     status = body.get('status')
-    if status and str(status).lower() not in ('success', 'ok', '0'):
+    if status and str(status).lower() not in ('success', 'succeeded', 'ok', '0'):
         raise OCRError(f'OCR 失败：{body.get("message") or status}',
                        code='ocr_business_error', detail=body)
 
