@@ -35,9 +35,9 @@ ACTIVATED = False
 # ---------- 日志配置 ----------
 
 def setup_logging():
-    """配置文件日志到 dist 目录，支持轮转（单文件最大 5MB，保留 3 个备份）。"""
+    """配置文件日志到 exe 同级目录，支持轮转（单文件最大 5MB，保留 3 个备份）。"""
     if getattr(sys, 'frozen', False):
-        log_dir = os.path.join(os.path.dirname(sys.executable), 'dist')
+        log_dir = os.path.dirname(sys.executable)
     else:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'dist')
     os.makedirs(log_dir, exist_ok=True)

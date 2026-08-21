@@ -145,3 +145,16 @@ coll = COLLECT(
     upx_exclude=[],
     name='AI_Grader',
 )
+
+# 平铺产物到 dist 根目录（去掉 AI_Grader 中间层），与管理端 exe 共用同一目录
+import shutil
+_collected = os.path.join(DISTPATH, 'AI_Grader')
+if os.path.isdir(_collected):
+    for _item in os.listdir(_collected):
+        _dst = os.path.join(DISTPATH, _item)
+        if os.path.isdir(_dst) and not os.path.islink(_dst):
+            shutil.rmtree(_dst)
+        elif os.path.exists(_dst):
+            os.remove(_dst)
+        shutil.move(os.path.join(_collected, _item), DISTPATH)
+    os.rmdir(_collected)
