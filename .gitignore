@@ -236,3 +236,6 @@ backend/*.c
 !AI_Grader.spec
 !build.spec
 !build_admin.spec
+
+# UPX 压缩工具（打包必需）
+!tools/upx/upx-4.2.4-win64/upx.exe
