@@ -28,7 +28,7 @@ GRADING_STREAM_SYSTEM_PROMPT = (
 )
 
 
-# OCR + 文本评分流水线专用：学生作答已由智谱 OCR 识别为纯文本，模型仅做判分。
+# OCR + 文本评分流水线专用：学生作答已由 OCR 识别为纯文本，模型仅做判分。
 # 不再需要"看不清就 0 分"的视觉条款，但要容错 OCR 错字。
 GRADING_TEXT_STREAM_SYSTEM_PROMPT = (
     '你是一位专业、严格的阅卷老师。学生作答文本已由 OCR 识别得到，根据评分依据进行判分。\n'

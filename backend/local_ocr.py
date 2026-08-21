@@ -72,10 +72,7 @@ class LocalOCRError(Exception):
 
 
 def call_local_ocr(image_bytes, mime_type='image/jpeg'):
-    """对图片字节执行本地 OCR，返回 {'text', 'words_count', 'raw'}。
-
-    与 zhipu_ocr.call_handwriting_ocr 返回格式兼容。
-    """
+    """对图片字节执行本地 OCR，返回 {'text', 'words_count', 'raw'}。"""
     if not image_bytes:
         raise LocalOCRError('输入图片为空', 'local_ocr_empty_image')
 

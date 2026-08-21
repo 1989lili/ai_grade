@@ -77,7 +77,6 @@ a = Analysis(
         'activation_ui',
         'integrity',
         'grading_prompts',
-        'zhipu_ocr',
         'local_ocr',
         'numpy',
         'cv2',

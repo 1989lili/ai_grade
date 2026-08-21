@@ -769,7 +769,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (result.status === 'success') {
-            var ocrLabel = result.ocr_label || '智谱-GLM-OCR';
+            var ocrLabel = result.ocr_label || '视觉直评';
             var providerLabel = result.provider_label || '';
 
             if (result.student_answer) {

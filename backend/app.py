@@ -235,9 +235,6 @@ LLM_STREAM_MAX_TOKENS = 400
 # 流式调用首包（首个 token 或 reasoning 片段）必须在该秒数内到达，否则视为超时
 LLM_FIRST_BYTE_TIMEOUT = 8
 
-# 云端 OCR 读取超时（秒），超时自动降级本地 OCR，保障单次阅卷总耗时 ≤10s
-OCR_READ_TIMEOUT = 6
-
 
 class GradingError(Exception):
     def __init__(self, message, code='grading_error', status_code=500, detail=None):
@@ -255,10 +252,8 @@ from grading_prompts import (
 )
 
 try:
-    from .zhipu_ocr import call_handwriting_ocr, OCRError
     from .local_ocr import call_local_ocr, LocalOCRError
 except ImportError:
-    from zhipu_ocr import call_handwriting_ocr, OCRError  # type: ignore
     from local_ocr import call_local_ocr, LocalOCRError  # type: ignore
 
 
@@ -917,12 +912,10 @@ def stream_analyze_card_grading(data):
     api_key = data.get('apiKey', '')
     model_name = data.get('modelName', '')
     provider = data.get('provider', '')
-    ocr_api_key = data.get('ocrApiKey', '') or ''
-    # 识别方式：vision=视觉直评（默认）/ local=本地OCR / cloud=智谱云端OCR
+    # 视觉直评内置（默认）：直接用所选服务商的模型一次调用完成识别+评分；本地 OCR 仅作离线兜底
     ocr_mode = data.get('ocrMode', 'vision')
-    vision_model_name = data.get('visionModelName', '') or 'glm-4v-flash'
 
-    if ocr_mode not in ('vision', 'local', 'cloud'):
+    if ocr_mode not in ('vision', 'local'):
         ocr_mode = 'vision'
 
     if not api_key:
@@ -931,11 +924,6 @@ def stream_analyze_card_grading(data):
     if not card_area:
         yield ndjson_event('error', code='missing_card_area', message='请先框定答题卡区域')
         return
-    if ocr_mode == 'cloud' and not ocr_api_key:
-        yield ndjson_event('error', code='missing_ocr_api_key',
-                           message='请先在AI配置页面填写智谱 OCR API Key')
-        return
-
     yield ndjson_event('status', message='已收到评分请求，正在准备截图...')
 
     # ── 截图 + 预处理 ──
@@ -958,45 +946,20 @@ def stream_analyze_card_grading(data):
         yield ndjson_event('error', code='capture_failed', message=f'截图答题卡失败：{exc}')
         return
 
-    # ── 识别阶段：视觉直评直接跳过 OCR；local/cloud 走 OCR（云端超时自动降级本地） ──
+    # ── 识别阶段：视觉直评内置（默认），直接调用所选服务商的模型一次完成识别+评分 ──
     ocr_text = ''
     ocr_result = None
     ocr_ms = 0
-    ocr_label = '视觉直评-' + vision_model_name if ocr_mode == 'vision' else ''
+    ocr_label = '视觉直评-' + model_name if ocr_mode == 'vision' else ''
     if ocr_mode == 'vision':
-        yield ndjson_event('status', message=f'正在调用视觉模型 {vision_model_name} 识别并评分...')
+        yield ndjson_event('status', message=f'正在调用视觉模型 {model_name} 识别并评分...')
     else:
         image_bytes = base64.b64decode(image_b64)
-        ext = 'jpg' if image_mime == 'image/jpeg' else 'png'
-        if ocr_mode == 'local':
-            yield ndjson_event('status', message='正在调用本地 OCR 引擎识别手写文字...')
-        else:
-            yield ndjson_event('status', message='正在调用智谱 OCR 识别手写文字...')
+        yield ndjson_event('status', message='正在调用本地 OCR 引擎识别手写文字...')
         ocr_started = time.monotonic()
         try:
-            if ocr_mode == 'cloud':
-                try:
-                    ocr_result = call_handwriting_ocr(
-                        ocr_api_key,
-                        image_bytes,
-                        mime_type=image_mime,
-                        filename=f'card.{ext}',
-                        read_timeout=OCR_READ_TIMEOUT,
-                    )
-                    ocr_label = '智谱-GLM-OCR'
-                except OCRError as exc:
-                    # 云端超时/网络异常 → 降级本地 OCR，保障总耗时 ≤10s
-                    if exc.code in ('ocr_read_timeout', 'ocr_connect_timeout',
-                                    'ocr_connection_error', 'ocr_request_error'):
-                        log.warning('云端 OCR 失败(%s)，降级本地 OCR: %s', exc.code, exc.message)
-                        yield ndjson_event('status', message='云端 OCR 超时，自动降级本地 OCR...')
-                        ocr_result = call_local_ocr(image_bytes, mime_type=image_mime)
-                        ocr_label = '本地OCR(降级)'
-                    else:
-                        raise
-            else:
-                ocr_result = call_local_ocr(image_bytes, mime_type=image_mime)
-                ocr_label = '本地OCR'
+            ocr_result = call_local_ocr(image_bytes, mime_type=image_mime)
+            ocr_label = '本地OCR'
             ocr_text = ocr_result['text']
             ocr_ms = int((time.monotonic() - ocr_started) * 1000)
             log.info('%s 完成, 字数=%d, 耗时=%d ms', ocr_label, len(ocr_text), ocr_ms)
@@ -1015,22 +978,16 @@ def stream_analyze_card_grading(data):
             log.warning('本地 OCR 失败: %s', exc.message)
             yield ndjson_event('error', code=exc.code, message=exc.message)
             return
-        except OCRError as exc:
-            log.warning('OCR 失败: %s', exc.message)
-            yield ndjson_event('error', code=exc.code, message=exc.message)
-            return
         except Exception as exc:
             log.exception('OCR 调用异常')
             yield ndjson_event('error', code='ocr_failed', message=f'OCR 调用失败：{exc}')
             return
 
     # ── AI 评分（流式） ──
+    model_provider, model_key, model_call = provider, api_key, model_name
     if ocr_mode == 'vision':
-        # 视觉直评：一次调用完成识别+评分（直接用所选服务商的可识图模型，如 glm-4v-flash）
-        model_provider, model_key, model_call = provider, api_key, model_name
         yield ndjson_event('status', message=f'正在调用 {model_name} 视觉直评...')
     else:
-        model_provider, model_key, model_call = provider, api_key, model_name
         yield ndjson_event('status', message='OCR 完成，正在调用评分模型...')
     model_started = time.monotonic()
     model_queue = queue.Queue()
@@ -1148,7 +1105,7 @@ def stream_analyze_card_grading(data):
             'full_text': full_text,
             'ocr_text': ocr_text,
             'provider_label': provider_label,
-            'ocr_label': ocr_label or '智谱-GLM-OCR',
+            'ocr_label': ocr_label or '视觉直评',
             'ocr_mode': ocr_mode,
             'timings': timings,
         })
@@ -1238,7 +1195,6 @@ def save_preset():
         api_key = data.get('apiKey', '')
         model_name = data.get('modelName', '')
         provider = data.get('provider', '')
-        ocr_api_key = data.get('ocrApiKey', '')
 
         if not api_key:
             return jsonify({'status': 'error', 'message': 'API Key不能为空'})
@@ -1251,9 +1207,6 @@ def save_preset():
             'apiKey': api_key,
             'modelName': model_name,
             'provider': provider,
-            'ocrApiKey': ocr_api_key,
-            'ocrMode': data.get('ocrMode', 'vision'),
-            'visionModelName': data.get('visionModelName', ''),
             'timestamp': datetime.datetime.now().isoformat()
         }
 
