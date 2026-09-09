@@ -230,6 +230,11 @@ __marimo__/
 *.dll
 *.pyd
 presets.json
+# Inno Setup 安装包输出
+Output/
+# 运行时生成的数据（现统一写到 %APPDATA%\AI_Grader，仓库里出现的都是历史残留/误生成）
+scoring_templates.json
+marker_state.json
 backend/*.c
 
 # Keep project PyInstaller specs under version control

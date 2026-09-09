@@ -166,7 +166,7 @@
             <div class="left-panel">
                 <div class="image-area">
                     <img id="paperImage" alt="答题卡图片">
-                    <div id="placeholder" class="image-placeholder">图片区域</div>
+                    <div id="placeholder" class="image-placeholder">正在加载答题卡…</div>
                 </div>
 
                 <div class="nav-buttons">
@@ -185,24 +185,22 @@
                 <div id="submitStatus" class="status"></div>
 
                 <div class="tip">
-                    已加载题目1、题目2、题目3下的小文、小浩、小熊作答图片，用于模拟上一张/下一张切换。
+                    图片取自同级「答题卡」文件夹，按文件名顺序切换：答题卡1.png → 答题卡2.png → 答题卡3.png → 答题卡4.png。
+                    可用“上一张/下一张”浏览，提交后自动进入下一张。
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        const images = [
-            '题目1/小文题目1作答.png',
-            '题目1/小浩题目1作答.png',
-            '题目1/小熊题目1作答.png',
-            '题目2/小文题目2作答.png',
-            '题目2/小浩题目2作答.png',
-            '题目2/小熊题目2作答.png',
-            '题目3/小文题目3作答.png',
-            '题目3/小浩题目3作答.png',
-            '题目3/小熊题目3作答.png'
-        ];
+        // 图片取自本文件同级的「答题卡」文件夹，按文件名编号 1、2、3、4 顺序排列
+        const IMAGE_DIR = '答题卡';
+        const IMAGE_FILE_PREFIX = '答题卡';
+        const IMAGE_COUNT = 4; // 答题卡1.png ~ 答题卡4.png；新增图片改这个数字即可
+
+        const images = Array.from({ length: IMAGE_COUNT }, (_, i) =>
+            `${IMAGE_DIR}/${IMAGE_FILE_PREFIX}${i + 1}.png`
+        );
 
         let currentIndex = 0;
         const paperImage = document.getElementById('paperImage');
@@ -213,22 +211,36 @@
         const submitBtn = document.getElementById('submitBtn');
         const submitStatus = document.getElementById('submitStatus');
 
+        // 图片加载失败时给出明确提示，而不是显示破图
+        paperImage.onerror = () => {
+            paperImage.style.display = 'none';
+            placeholder.style.display = 'block';
+            placeholder.textContent = `未找到图片：${images[currentIndex]}`;
+        };
+
+        paperImage.onload = () => {
+            paperImage.style.display = 'block';
+            placeholder.style.display = 'none';
+        };
+
         function renderImage() {
             if (images.length === 0) {
                 paperImage.style.display = 'none';
                 placeholder.style.display = 'block';
+                placeholder.textContent = '答题卡文件夹里没有图片';
                 prevBtn.disabled = true;
                 nextBtn.disabled = true;
+                submitBtn.disabled = true;
                 return;
             }
 
-            paperImage.src = images[currentIndex];
-            paperImage.style.display = 'block';
+            const currentFile = images[currentIndex].split('/').pop();
             placeholder.style.display = 'none';
+            paperImage.src = images[currentIndex];
             prevBtn.disabled = currentIndex === 0;
             nextBtn.disabled = currentIndex === images.length - 1;
             submitBtn.disabled = false;
-            submitStatus.textContent = `当前第 ${currentIndex + 1} / ${images.length} 张`;
+            submitStatus.textContent = `当前第 ${currentIndex + 1} / ${images.length} 张（${currentFile}）`;
         }
 
         prevBtn.addEventListener('click', () => {

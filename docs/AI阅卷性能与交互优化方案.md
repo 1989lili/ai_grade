@@ -77,7 +77,7 @@
 2. 视觉直评：GLM-4V-Flash（免费、首 token 快），复用智谱 key；复用现有 `build_grading_messages` 多模态路径，prompt 要求一次输出「识别文本 + 分数 JSON」，流式返回；
 3. 本地 OCR：RapidOCR（onnxruntime CPU），手写识别模型约 15MB，可随包分发，离线可用；
 4. 评分模型：非推理快速模型（glm-4-flash / deepseek-chat 关闭 thinking），流式输出；
-5. 熔断机制：OCR 6s 超时自动降级、LLM 首包 8s 熔断（已有）、任何路径总耗时 ≤10s。
+5. 超时兜底：仅保留 socket 级超时（连接 5s / 读 30s）+ 失败重试 1 次。~~LLM 首包 8s 熔断~~ 已于 2026-09-09 按需求**删除**——模型首包慢时不再中断批改，只按秒回传"已等待 N 秒"状态；云端 OCR 6s 降级方案未实现（`zhipu_ocr.py`/`recognizer.py` 未落地）。
 
 ### 4.2 时间预算
 
