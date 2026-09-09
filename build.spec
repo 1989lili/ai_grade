@@ -78,6 +78,8 @@ a = Analysis(
         'integrity',
         'grading_prompts',
         'local_ocr',
+        'zhipu_ocr',
+        'paths',
         'numpy',
         'cv2',
         'onnxruntime',
@@ -116,6 +118,13 @@ a.binaries += [(d, os.path.join(sys.prefix, d), 'BINARY') for d in _VC_DLLS
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# ── 目录模式（onedir）+ Inno Setup 安装包 ──
+# 实测启动耗时：onefile 4.8s（每次把 233.9MB 解压到 %TEMP%）vs onedir 2.5s。
+# 因此改为 onedir 产物，再由 installer.iss 打成单个 setup exe：
+# 首次运行静默解压安装到 %LOCALAPPDATA%\AI_Grader，之后双击安装包会直接启动已安装程序，
+# 不再重复解压 —— 用户拿到的仍是“一个 exe”，但没有每次解压的等待。
+# 可写数据（预设/模板/标记位置/日志）统一在 %APPDATA%\AI_Grader，见 backend/paths.py，
+# 所以安装目录即使只读也能正常工作。
 exe = EXE(
     pyz,
     a.scripts,
@@ -146,15 +155,8 @@ coll = COLLECT(
     name='AI_Grader',
 )
 
-# 平铺产物到 dist 根目录（去掉 AI_Grader 中间层），与管理端 exe 共用同一目录
-import shutil
-_collected = os.path.join(DISTPATH, 'AI_Grader')
-if os.path.isdir(_collected):
-    for _item in os.listdir(_collected):
-        _dst = os.path.join(DISTPATH, _item)
-        if os.path.isdir(_dst) and not os.path.islink(_dst):
-            shutil.rmtree(_dst)
-        elif os.path.exists(_dst):
-            os.remove(_dst)
-        shutil.move(os.path.join(_collected, _item), DISTPATH)
-    os.rmdir(_collected)
+# 清理上一版 onefile 平铺在 dist 根目录的遗留文件，避免与 onedir 目录混淆
+_legacy_internal = os.path.join(DISTPATH, '_internal')
+if os.path.isdir(_legacy_internal):
+    import shutil
+    shutil.rmtree(_legacy_internal, ignore_errors=True)
