@@ -336,12 +336,12 @@ def build_grading_messages(image_base64, standards, streaming=False, image_mime_
             "\n"
             "学生作答：<把上面的学生作答原文原样放回>\n"
             "阅卷评析：<按评分点说明学生答了什么→是否符合要点→得/扣几分及原因，最后一句汇总>\n"
-            "成绩得分：<score>/<max_score>\n"
+            "成绩得分：<score>\n"
             "\n"
             "要求：\n"
             "- 顺序必须是上面三行：先学生作答、再阅卷评析、最后成绩得分，各占一行，标签后紧跟冒号\n"
-            "- 成绩得分必须是最后一行；成绩得分里的 score、max_score 只能是数字\n"
-            "- 在“学生作答：”之前不要输出任何内容（不要得分行、不要标题、不要铺垫语）\n"
+            "- 成绩得分只写分数数字本身（例如 6），不要写成 6/10，不要写满分\n"
+            "- 成绩得分必须是最后一行；在“学生作答：”之前不要输出任何内容（不要分值行、不要标题、不要铺垫语）\n"
             "- 不要输出任何 JSON 大括号、代码块或前后缀说明"
         )
     else:
@@ -757,6 +757,14 @@ def parse_score(response_text):
                 'student_answer': extract_labeled(text, '学生作答'),
                 'review_analysis': extract_labeled(text, '阅卷评析')}
 
+    # 纯数字得分行：成绩得分：6（不带满分）
+    score_only = re.search(r'成绩得分[:：]\s*(\d+(?:\.\d+)?)', text)
+    if score_only:
+        return {'score': float(score_only.group(1)), 'max_score': 0,
+                'reasoning': text,
+                'student_answer': extract_labeled(text, '学生作答'),
+                'review_analysis': extract_labeled(text, '阅卷评析')}
+
     # 尝试纯数字：8/10
     num_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
     if num_match:
@@ -1005,6 +1013,21 @@ def ndjson_event(event_type, **payload):
     return json.dumps(data, ensure_ascii=False) + '\n'
 
 
+# 识别文本中的“印刷分值”残渣：形如「6分」「1分」「本题6分」「0.5分」的独立短行会被丢弃，
+# 但纯数字行（如题号 17 / 18）会保留，避免把答题卡上印刷的分值喂给评分模型。
+_OCR_SCORE_LINE_RE = re.compile(
+    r'^\s*(?:[第共本题]?\s*)?(?:\d+(?:\.\d+)?|[一二两三四五六七八九十百]+)\s*分\s*$'
+)
+
+
+def _clean_ocr_lines(text):
+    """删除 OCR 结果中的印刷分值残渣行（本地/云端识别后统一执行）。"""
+    if not text:
+        return ''
+    kept = [ln for ln in text.split('\n') if ln.strip() and not _OCR_SCORE_LINE_RE.match(ln.strip())]
+    return '\n'.join(kept).strip()
+
+
 def stream_analyze_card_grading(data):
     request_started = time.monotonic()
     if not data:
@@ -1106,6 +1129,7 @@ def stream_analyze_card_grading(data):
 
     ocr_ms = int((time.monotonic() - ocr_started) * 1000)
     ocr_text = (ocr_text or '').strip()
+    ocr_text = _clean_ocr_lines(ocr_text)
     log.info('识别完成[%s]: 字数=%d, 耗时=%d ms', ocr_label, len(ocr_text), ocr_ms)
     yield ndjson_event('timing', key='ocr', label=ocr_label, duration_ms=ocr_ms,
                        words_count=ocr_words, ocr_mode=ocr_mode_used)

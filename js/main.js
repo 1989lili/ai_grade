@@ -1175,6 +1175,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 var analyzeResult = null;
                 var reasoningStarted = false;
                 var analyzeTimings = {};
+                // 流式逐行缓冲：整行完整后再上屏，方便做行级清洗
+                // （例如把模型偶尔仍输出的“成绩得分：6/10”兜底改成“成绩得分：6”）
+                var streamPending = '';
+
+                function cleanStreamLine(line) {
+                    return String(line).replace(
+                        /(成绩得分[:：]\s*\d+(?:\.\d+)?)\s*\/\s*\d+/g, '$1'
+                    );
+                }
+                function flushStreamLines() {
+                    var idx;
+                    while ((idx = streamPending.indexOf('\n')) !== -1) {
+                        appendStreamContent(cleanStreamLine(streamPending.slice(0, idx)) + '\n');
+                        streamPending = streamPending.slice(idx + 1);
+                    }
+                }
+                function flushStreamRest() {
+                    if (streamPending) {
+                        appendStreamContent(cleanStreamLine(streamPending));
+                        streamPending = '';
+                    }
+                }
+
                 var ocrSettings = getOcrSettings();
                 var analyzeResponse = await fetch('/api/grade/analyze-stream', {
                     method: 'POST',
@@ -1213,7 +1236,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             .replace(/```(?:json)?/gi, '')
                             .replace(/```/g, '');
                         if (chunk) {
-                            appendStreamContent(chunk);
+                            streamPending += chunk;
+                            flushStreamLines();
                         }
                         return;
                     }
@@ -1237,6 +1261,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                     if (event.type === 'final') {
+                        // 冲刷尚未换行收尾的流式内容
+                        flushStreamRest();
                         analyzeResult = event.result;
                         // OCR 文本兜底：若后端 final 缺 student_answer，使用流式 ocr_text 缓存
                         if (analyzeResult && !analyzeResult.student_answer && analyzeTimings.__ocr_text) {
@@ -1446,7 +1472,7 @@ document.addEventListener('DOMContentLoaded', function() {
         records.forEach(function(r, pos) {
             var head = '<span>' + gradeEsc(r.ts || '') +
                        (r.index ? '　·　第 ' + gradeEsc(r.index) + ' 份' : '') + '</span>' +
-                       '<span class="record-item-score">' + gradeEsc(r.score) + ' / ' + gradeEsc(r.max_score) + ' 分</span>' +
+                       '<span class="record-item-score">' + gradeEsc(r.score) + ' 分</span>' +
                        '<button class="record-delete" data-pos="' + pos + '">删除</button>';
             var html = '<div class="record-item">' +
                        '<div class="record-item-head">' + head + '</div>';
