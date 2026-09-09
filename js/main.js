@@ -1167,7 +1167,7 @@ document.addEventListener('DOMContentLoaded', function() {
             activateMainTab('scoring-process-tab');
             resetGradingUI();
             if (oneShot) {
-                appendStreamContent('=== 调试：第 ' + (completed + 1) + ' 份（不填写、不提交）===\n');
+                appendStreamContent('=== 调试：第 ' + (completed + 1) + ' 题（回写提交后停止）===\n');
             } else {
                 appendStreamContent('=== 第 ' + (completed + 1) + ' / ' + total + ' 份 ===\n');
             }
@@ -1339,22 +1339,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 模型文本已实时上屏（流式），这里补一行收尾提示
                 appendStreamContent('\n');
 
-                // ── 调试模式：只展示结果，不填写分数、不点击提交，不进入下一张 ──
-                if (oneShot) {
-                    stopElapsedTimer();
-                    saveGradeRecord(analyzeResult, completed + 1);
-                    appendStreamContent('【调试】第 ' + (completed + 1) + ' 张批改完成，得分：' +
-                                        analyzeResult.score + '（未填写、未提交）\n');
-                    if (markersHidden && api && api.show_marker_at) {
-                        await restoreMarkers(cardArea, scoreBox, submitBtn);
-                        markersHidden = false;
-                    }
-                    debugInput.value = '调试完成 第 ' + (completed + 1) + ' 张 得分: ' + analyzeResult.score;
-                    oneShotDone = true;
-                    break;
-                }
-
-                // ── 填写分数并提交 ──
+                // ── 填写分数并提交（整批与调试都会回写分数并点击提交） ──
                 var applyResponse = await fetch('/api/grade/apply', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1375,6 +1360,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 stopElapsedTimer();
+
+                // ── 调试模式：分数已回写并提交，批完这一张就停。
+                //    页面由阅卷系统切到下一题，但我们不再扫描、不再调用大模型，等用户再点。
+                if (oneShot) {
+                    saveGradeRecord(analyzeResult, completed + 1);
+                    // 恢复标记（同步等 tk 线程真正显示完成）
+                    if (markersHidden && api && api.show_marker_at) {
+                        await restoreMarkers(cardArea, scoreBox, submitBtn);
+                        markersHidden = false;
+                    }
+                    appendStreamContent('【调试】第 ' + (completed + 1) + ' 题：已回写并提交（得分 '
+                                        + analyzeResult.score + '）。已停止，等待下一次批改。\n');
+                    debugInput.value = '调试完成 第 ' + (completed + 1) + ' 题（已提交），得分: ' + analyzeResult.score;
+                    oneShotDone = true;
+                    break;
+                }
 
                 // ── 更新已改数量 ──
                 completed = completed + 1;
