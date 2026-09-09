@@ -49,17 +49,23 @@ DisableReadyPage=yes
 DisableFinishedPage=yes
 AllowNoIcons=yes
 
-; 体积/速度：LZMA2 极限压缩（234MB 产物压到 ~100MB 左右）
-; 调试时可用  ISCC /DFastCompile installer.iss  跳过压缩（编译秒级，产物很大，仅用于验证逻辑）
+; 压缩档位（打包速度依次 快→慢、体积 大→小）：
+;   默认 = lzma2/normal   —— 日常迭代用，编译约 30s，体积略增 1~3MB
+;   发布 = ISCC /DRelease —— 极限压缩，体积最小但编译 ~110s
+;   调试 = ISCC /DFastCompile —— 几乎不压缩，编译秒级（产物 ~234MB，仅供本地快速验证）
 #ifdef FastCompile
 Compression=zip/1
 OutputBaseFilename=好帮手AI阅卷安装程序-DEBUG
 #else
-Compression=lzma2/ultra64
-OutputBaseFilename=好帮手AI阅卷安装程序-{#MyAppVersion}
+  #ifdef Release
+    Compression=lzma2/ultra64
+    OutputBaseFilename=好帮手AI阅卷安装程序-{#MyAppVersion}
+  #else
+    Compression=lzma2/normal
+    OutputBaseFilename=好帮手AI阅卷安装程序-{#MyAppVersion}
+  #endif
 #endif
 SolidCompression=yes
-LZMAUseSeparateProcess=yes
 DiskSpanning=no
 
 ArchitecturesAllowed=x64compatible
