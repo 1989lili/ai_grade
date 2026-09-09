@@ -185,7 +185,7 @@
                 <div id="submitStatus" class="status"></div>
 
                 <div class="tip">
-                    图片取自同级「答题卡」文件夹，按文件名顺序切换：答题卡1.png → 答题卡2.png → 答题卡3.png → 答题卡4.png。
+                    图片取自同级「答题卡」文件夹，顺序：17-1 → 17-2 → 17-3 → 17-4 → 18-1 → 18-2 → 18-3 → 18-4。
                     可用“上一张/下一张”浏览，提交后自动进入下一张。
                 </div>
             </div>
@@ -193,14 +193,15 @@
     </div>
 
     <script>
-        // 图片取自本文件同级的「答题卡」文件夹，按文件名编号 1、2、3、4 顺序排列
+        // 图片取自本文件同级的「答题卡」文件夹：
+        // 加载顺序 = 17-1 → 17-2 → 17-3 → 17-4 → 18-1 → 18-2 → 18-3 → 18-4
         const IMAGE_DIR = '答题卡';
-        const IMAGE_FILE_PREFIX = '答题卡';
-        const IMAGE_COUNT = 4; // 答题卡1.png ~ 答题卡4.png；新增图片改这个数字即可
-
-        const images = Array.from({ length: IMAGE_COUNT }, (_, i) =>
-            `${IMAGE_DIR}/${IMAGE_FILE_PREFIX}${i + 1}.png`
-        );
+        const images = [];
+        for (const prefix of ['17', '18']) {
+            for (let i = 1; i <= 4; i++) {
+                images.push(`${IMAGE_DIR}/${prefix}-${i}.png`);
+            }
+        }
 
         let currentIndex = 0;
         const paperImage = document.getElementById('paperImage');
