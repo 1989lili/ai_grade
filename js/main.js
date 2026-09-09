@@ -1066,7 +1066,10 @@ document.addEventListener('DOMContentLoaded', function() {
         sync();
     })();
 
-    async function startGrading() {
+    // mode：'auto' 整批批改（默认）；'one' 调试模式——只批当前这一张，
+    // 不填写/不点击提交，不递增已改数量，也不进入下一张。
+    async function startGrading(mode) {
+        var oneShot = (mode === 'one');
         var debugInput = document.querySelector('.debug-info input');
         var progressFill = document.querySelector('.progress-fill');
         var progressText = document.querySelector('.progress-text');
@@ -1102,12 +1105,18 @@ document.addEventListener('DOMContentLoaded', function() {
         var total = parseInt(totalInput.value) || 0;
         var completed = parseInt(completedInput.value) || 0;
 
-        if (completed >= total) {
-            alert('已改数量已达到改卷数量，无需继续批改');
-            return;
+        // 【批改】不做只读限制：已改满也允许直接再批（自动从第一张重新计数，不清历史面板）
+        if (!oneShot && total > 0 && completed >= total) {
+            completedInput.value = 0;
+            completed = 0;
         }
 
-        setGradingButtons(true);
+        // 本轮实际批改的张数上限：调试模式只批一张（已改数量+1 那一个位置）
+        var runLimit = oneShot ? (completed + 1) : total;
+
+        if (!oneShot) {
+            setGradingButtons(true);
+        }
 
         var cardArea = rects.card;
         var scoreBox = rects.score;
@@ -1117,11 +1126,14 @@ document.addEventListener('DOMContentLoaded', function() {
         progressFill.classList.remove('task-completed');
         updateProgress();
 
-        // ── 循环批改，直到完成 ──
+        // ── 循环批改，直到本轮上限 ──
+        var oneShotDone = false;   // 调试模式跑完一圈就退出
         while (true) {
             total = parseInt(totalInput.value) || 0;
             completed = parseInt(completedInput.value) || 0;
-            if (completed >= total) {
+            if (oneShot) {
+                if (oneShotDone) break;
+            } else if (completed >= total) {
                 debugInput.value = '全部批改完成！共 ' + total + ' 份';
                 debugInput.classList.add('task-completed');
                 progressFill.classList.add('task-completed');
@@ -1154,8 +1166,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             activateMainTab('scoring-process-tab');
             resetGradingUI();
-            appendStreamContent('=== 第 ' + (completed + 1) + ' / ' + total + ' 份 ===\n');
-            debugInput.value = '正在批改第 ' + (completed + 1) + ' 份...';
+            if (oneShot) {
+                appendStreamContent('=== 调试：第 ' + (completed + 1) + ' 份（不填写、不提交）===\n');
+            } else {
+                appendStreamContent('=== 第 ' + (completed + 1) + ' / ' + total + ' 份 ===\n');
+            }
+            debugInput.value = (oneShot ? '调试批改第 ' : '正在批改第 ') + (completed + 1) + ' 份...';
             startElapsedTimer('倒计时 ');
 
             // 启动扫描动画
@@ -1304,6 +1320,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 // 模型文本已实时上屏（流式），这里补一行收尾提示
                 appendStreamContent('\n');
 
+                // ── 调试模式：只展示结果，不填写分数、不点击提交，不进入下一张 ──
+                if (oneShot) {
+                    stopElapsedTimer();
+                    saveGradeRecord(analyzeResult, completed + 1);
+                    appendStreamContent('【调试】第 ' + (completed + 1) + ' 张批改完成，得分：' +
+                                        analyzeResult.score + '（未填写、未提交）\n');
+                    if (markersHidden && api && api.show_marker_at) {
+                        await restoreMarkers(cardArea, scoreBox, submitBtn);
+                        markersHidden = false;
+                    }
+                    debugInput.value = '调试完成 第 ' + (completed + 1) + ' 张 得分: ' + analyzeResult.score;
+                    oneShotDone = true;
+                    break;
+                }
+
                 // ── 填写分数并提交 ──
                 var applyResponse = await fetch('/api/grade/apply', {
                     method: 'POST',
@@ -1409,25 +1440,23 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 【重置】：把“已改数量”归零、清空评分过程，让【批改】可以重新开始
-    var resetBtn = document.getElementById('reset-btn');
-    if (resetBtn) {
-        resetBtn.addEventListener('click', function() {
-            if (gradingActive || gradingBusy) return;   // 批改中不允许重置
+    // 【调试】：每次只批当前这一张——识别+评分+流式展示，
+    // 不填写分数、不点击提交、不递增已改数量、不进入下一张，可反复对同一张调参对比。
+    var debugBtn = document.getElementById('debug-btn');
+    if (debugBtn) {
+        debugBtn.addEventListener('click', async function() {
+            if (gradingBusy) return;
+            gradingBusy = true;
+            debugBtn.disabled = true;
             gradingStopRequested = false;
-            var debugInput2 = document.querySelector('.debug-info input');
-            if (debugInput2) {
-                debugInput2.classList.remove('task-completed');
-                debugInput2.value = '提示信息';
+            try {
+                await startGrading('one');
+            } catch (e) {
+                showGradingResult({ status: 'error', message: (e && e.message) || '调试失败' });
+            } finally {
+                gradingBusy = false;
+                debugBtn.disabled = false;
             }
-            var progressFill2 = document.querySelector('.progress-fill');
-            if (progressFill2) progressFill2.classList.remove('task-completed');
-            var progressText2 = document.querySelector('.progress-text');
-            if (progressText2) {
-                var totalInput2 = document.querySelector('.setting-group .setting-item:nth-child(1) input');
-                progressText2.textContent = '0 / ' + (parseInt(totalInput2 && totalInput2.value, 10) || 0);
-            }
-            resetGradingProgress();
         });
     }
 
