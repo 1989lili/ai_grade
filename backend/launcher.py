@@ -541,18 +541,14 @@ def _tk_marker_main(markers_out, ready_event):
         markers_out[mt] = TkMarker(root, mt)
     markers_out['_scan_line'] = TkScanLine(root)
 
-    # 复用上次退出时的标记框位置与大小，打开软件即可直接批改
+    # 记住上次的标记框位置与大小，但启动时默认隐藏（不自动弹出干扰用户）；
+    # 点“添加标记”时 WindowApi.show_marker 会读取这里的存档，按上次位置显示。
     saved_rects = _load_marker_state()
     for mt in MARKER_ORDER:
         rect = saved_rects.get(mt)
-        m = markers_out.get(mt)
-        if not m or not isinstance(rect, dict):
-            continue
-        try:
-            m._show(rect['x'], rect['y'], rect['w'], rect['h'])
-            log.info('恢复标记框 %s: x=%s y=%s w=%s h=%s', mt, rect.get('x'), rect.get('y'), rect.get('w'), rect.get('h'))
-        except Exception:
-            log.warning('恢复标记框失败: %s %s', mt, rect, exc_info=True)
+        if isinstance(rect, dict):
+            log.info('已记住标记框 %s 位置（启动默认隐藏）: x=%s y=%s w=%s h=%s',
+                     mt, rect.get('x'), rect.get('y'), rect.get('w'), rect.get('h'))
 
     ready_event.set()
 
