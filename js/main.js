@@ -1191,25 +1191,44 @@ document.addEventListener('DOMContentLoaded', function() {
                 var analyzeResult = null;
                 var reasoningStarted = false;
                 var analyzeTimings = {};
-                // 流式逐行缓冲：整行完整后再上屏，方便做行级清洗
-                // （例如把模型偶尔仍输出的“成绩得分：6/10”兜底改成“成绩得分：6”）
+                // 流式逐行缓冲：整行完整后再上屏，方便做行级清洗/白名单过滤
                 var streamPending = '';
+                // 输出白名单阶段：0=【学生作答】之前(丢弃前导/材料回显) 1=学生作答 2=阅卷评析 3=成绩得分之后(丢弃)
+                // 保证上屏的只有：学生作答 → 阅卷评析 → 成绩得分 三段，
+                // 模型若回显【题目材料】【参考答案】【评分要求】等发送给它的评分依据，一律不上屏，不浪费展示。
+                var streamPhase = 0;
 
                 function cleanStreamLine(line) {
                     return String(line).replace(
                         /(成绩得分[:：]\s*\d+(?:\.\d+)?)\s*\/\s*\d+/g, '$1'
                     );
                 }
+                // 按行决定是否上屏，并维护阶段
+                function renderStreamLine(raw) {
+                    var line = String(raw);
+                    var isStart1 = /^\s*学生作答\s*[:：]/.test(line);
+                    var isStart2 = /^\s*阅卷评析\s*[:：]/.test(line);
+                    var isStart3 = /^\s*成绩得分\s*[:：]/.test(line);
+                    if (isStart1) streamPhase = 1;
+                    else if (isStart2) streamPhase = 2;
+                    else if (isStart3) streamPhase = 3;
+                    if (isStart1 || isStart2 || isStart3) return cleanStreamLine(line);
+                    // 非标签行：学生作答/阅卷评析阶段显示；前导与得分之后丢弃
+                    if (streamPhase === 0 || streamPhase === 3) return '';
+                    return cleanStreamLine(line);
+                }
                 function flushStreamLines() {
                     var idx;
                     while ((idx = streamPending.indexOf('\n')) !== -1) {
-                        appendStreamContent(cleanStreamLine(streamPending.slice(0, idx)) + '\n');
+                        var out = renderStreamLine(streamPending.slice(0, idx));
+                        if (out) appendStreamContent(out + '\n');
                         streamPending = streamPending.slice(idx + 1);
                     }
                 }
                 function flushStreamRest() {
                     if (streamPending) {
-                        appendStreamContent(cleanStreamLine(streamPending));
+                        var out = renderStreamLine(streamPending);
+                        if (out) appendStreamContent(out);
                         streamPending = '';
                     }
                 }
