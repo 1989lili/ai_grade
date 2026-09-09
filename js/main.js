@@ -197,6 +197,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 ocrSel.value = target;
                 ocrSel.dispatchEvent(new Event('change'));
             }
+            refreshOcrKeyVisibility();
         }, 30);
     }
 
@@ -1095,9 +1096,20 @@ document.addEventListener('DOMContentLoaded', function() {
         return settings;
     }
 
+    // OCR Key 显隐：仅当“识别方式=智谱GLM-OCR”且“评分服务商不是智谱”时才需要单独填写；
+    // 服务商就是智谱时自动复用其 API Key（后端已按此逻辑），因此默认不显示。
+    function ocrKeyShouldShow() {
+        var sel = document.getElementById('ocr-mode-select');
+        var provSel = document.querySelector('.provider-select');
+        return !!(sel && provSel && sel.value === 'zhipu' && provSel.value !== 'zhipu');
+    }
+    function refreshOcrKeyVisibility() {
+        var keyItem = document.getElementById('ocr-zhipu-key-item');
+        if (keyItem) keyItem.style.display = ocrKeyShouldShow() ? '' : 'none';
+    }
+
     (function setupOcrModeSelect() {
         var sel = document.getElementById('ocr-mode-select');
-        var keyItem = document.getElementById('ocr-zhipu-key-item');
         if (!sel) return;
         try {
             var saved = localStorage.getItem('ocr_mode');
@@ -1106,8 +1118,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (e) { /* localStorage 不可用时忽略 */ }
         function sync() {
-            if (keyItem) keyItem.style.display = sel.value === 'zhipu' ? '' : 'none';
             try { localStorage.setItem('ocr_mode', sel.value); } catch (e) {}
+            refreshOcrKeyVisibility();
         }
         sel.addEventListener('change', sync);
         sync();

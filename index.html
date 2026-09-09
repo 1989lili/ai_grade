@@ -46,17 +46,17 @@
                                     <select class="provider-select">
                                         <option value="doubao">字节豆包</option>
                                         <option value="deepseek">深度求索</option>
-                                        <option value="zhipu">智谱AI</option>
+                                        <option value="zhipu" selected>智谱AI</option>
                                     </select>
                                 </div>
                                 <div class="api-key-url">
                                     <label>当前服务商 API Key 申请地址</label>
-                                    <a href="https://console.volcengine.com/" target="_blank" class="api-url-link">https://console.volcengine.com/</a>
+                                    <a href="https://open.bigmodel.cn/" target="_blank" class="api-url-link">https://open.bigmodel.cn/</a>
                                 </div>
                             </div>
                         </div>
                         
-                        <div class="doubao-config-section provider-config" data-provider="doubao">
+                        <div class="doubao-config-section provider-config" data-provider="doubao" style="display: none;">
                             <h4>字节豆包配置</h4>
                             <div class="config-item">
                                 <label for="api-key-doubao">API Key:</label>
@@ -101,7 +101,7 @@
                             </div>
                         </div>
 
-                        <div class="zhipu-config-section provider-config" data-provider="zhipu" style="display: none;">
+                        <div class="zhipu-config-section provider-config" data-provider="zhipu">
                             <h4>智谱AI配置</h4>
                             <div class="config-item">
                                 <label for="api-key-zhipu">API Key:</label>
