@@ -1054,6 +1054,17 @@ document.addEventListener('DOMContentLoaded', function() {
         box.scrollTop = box.scrollHeight;
     }
 
+    // 流式段标题（【学生作答】【阅卷评析】【成绩得分】）：独立一行、加粗放大
+    function appendStreamTitle(title) {
+        var box = document.getElementById('grading-stream-content');
+        if (!box) return;
+        var d = document.createElement('div');
+        d.className = 'stream-title-label';
+        d.textContent = '【' + title + '】';
+        box.appendChild(d);
+        box.scrollTop = box.scrollHeight;
+    }
+
     // 批改失败也写进同一个“评分过程”框（结果框已合并、删除）
     function showGradingResult(result) {
         if (!result || result.status === 'success') return;
@@ -1248,32 +1259,38 @@ document.addEventListener('DOMContentLoaded', function() {
                         /(成绩得分[:：]\s*\d+(?:\.\d+)?)\s*\/\s*\d+/g, '$1'
                     );
                 }
-                // 按行决定是否上屏，并维护阶段
-                function renderStreamLine(raw) {
+                // 按行决定如何上屏：标签行转成加粗大标题【学生作答】【阅卷评析】【成绩得分】，
+                // 内容行进入对应阶段；阶段 0/3 的内容（前导材料回显、得分之后多余行）一律丢弃。
+                function processStreamLine(raw) {
                     var line = String(raw);
-                    var isStart1 = /^\s*学生作答\s*[:：]/.test(line);
-                    var isStart2 = /^\s*阅卷评析\s*[:：]/.test(line);
-                    var isStart3 = /^\s*成绩得分\s*[:：]/.test(line);
-                    if (isStart1) streamPhase = 1;
-                    else if (isStart2) streamPhase = 2;
-                    else if (isStart3) streamPhase = 3;
-                    if (isStart1 || isStart2 || isStart3) return cleanStreamLine(line);
-                    // 非标签行：学生作答/阅卷评析阶段显示；前导与得分之后丢弃
-                    if (streamPhase === 0 || streamPhase === 3) return '';
-                    return cleanStreamLine(line);
+                    var m = /^\s*(学生作答|阅卷评析|成绩得分)\s*[:：]/.exec(line);
+                    if (m) {
+                        if (m[1] === '学生作答') streamPhase = 1;
+                        else if (m[1] === '阅卷评析') streamPhase = 2;
+                        else streamPhase = 3;
+                        appendStreamTitle(m[1]);
+                        var rest = line.slice(m[0].length);
+                        if (rest.trim()) {
+                            appendStreamContent(cleanStreamLine(rest) + '\n');
+                        } else {
+                            appendStreamContent('\n');
+                        }
+                        return;
+                    }
+                    if (streamPhase === 0 || streamPhase === 3) return;   // 丢弃
+                    var out = cleanStreamLine(line);
+                    if (out) appendStreamContent(out + '\n');
                 }
                 function flushStreamLines() {
                     var idx;
                     while ((idx = streamPending.indexOf('\n')) !== -1) {
-                        var out = renderStreamLine(streamPending.slice(0, idx));
-                        if (out) appendStreamContent(out + '\n');
+                        processStreamLine(streamPending.slice(0, idx));
                         streamPending = streamPending.slice(idx + 1);
                     }
                 }
                 function flushStreamRest() {
                     if (streamPending) {
-                        var out = renderStreamLine(streamPending);
-                        if (out) appendStreamContent(out);
+                        processStreamLine(streamPending);
                         streamPending = '';
                     }
                 }

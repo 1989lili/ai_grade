@@ -1336,6 +1336,16 @@
             font-size: 12px;
             color: #666;
             white-space: nowrap;
+            /* 需求：进度条上不显示文字 */
+            display: none;
+        }
+
+        /* 流式输出的段标题（【学生作答】【阅卷评析】【成绩得分】）：加粗 + 放大 1 号 */
+        .stream-title-label {
+            font-size: 15px;
+            font-weight: bold;
+            color: #1a1a2e;
+            margin-top: 6px;
         }
 
         /* HTML 标记框 */
@@ -1400,10 +1410,26 @@
             background: #dc3545;
         }
 
-        /* ---------- 阅卷记录面板 ---------- */
+        /* ---------- 阅卷记录面板：与主窗口同尺寸的大面板，可滚动、文字可选中复制 ---------- */
         .record-panel {
-            width: 560px;
-            max-width: 90vw;
+            width: 96vw;
+            max-width: 96vw;
+            height: 96vh;
+            max-height: 96vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .record-panel .preset-panel-header {
+            flex-shrink: 0;
+        }
+        .record-panel .preset-panel-list {
+            flex: 1;
+            min-height: 0;
+            max-height: none;
+            overflow-y: auto;
+            user-select: text;
+            cursor: text;
+            -webkit-user-select: text;
         }
         .record-item {
             border: 1px solid #e5eaf3;
@@ -1449,7 +1475,4 @@
             color: #333;
             white-space: pre-wrap;
             word-break: break-word;
-        }
-        .record-panel .preset-panel-list {
-            max-height: 70vh;
         }

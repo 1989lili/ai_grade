@@ -1037,6 +1037,33 @@ def _clean_ocr_lines(text):
     return '\n'.join(kept).strip()
 
 
+# 被模型“夹带”回显进输出字段的评分依据段落头（此类行起的内容应从结果中剔除）
+_INJECTED_HEAD_RE = re.compile(
+    r'^\s*【\s*(题目材料|题目|参考答案|评价示例|评分要求|评分标准|评分细则|注意事项|材料|示例)\s*】'
+    r'|^\s*(题目材料|参考答案|评价示例|评分要求|评分细则)[:：]'
+)
+
+
+def _strip_injected_materials(text):
+    """从模型输出字段里剔除其回显的评分依据段落（【题目材料】等），保留作答/评析正文。"""
+    if not text:
+        return ''
+    out = []
+    skipping = False
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if _INJECTED_HEAD_RE.search(stripped):
+            skipping = True
+            continue
+        if skipping:
+            # 遇到空行认为材料段结束；否则若出现作答特征行也结束
+            if not stripped:
+                skipping = False
+            continue
+        out.append(line)
+    return '\n'.join(out).strip()
+
+
 def _detect_question_numbers(ocr_text):
     """从学生作答文本里找出实际出现的大题号（行首数字 + 点号），用于约束评分范围。
 
@@ -1273,6 +1300,11 @@ def stream_analyze_card_grading(data):
             'deepseek': 'DeepSeek',
         }
         provider_label = '%s-%s' % (provider_label_map.get(model_provider, model_provider), model_call)
+
+        # 若模型把评分依据（题目材料/参考答案等）夹带进输出字段，落库/展示前剔除
+        student_answer = _strip_injected_materials(student_answer)
+        review_analysis = _strip_injected_materials(review_analysis)
+        reasoning = _strip_injected_materials(reasoning)
 
         yield ndjson_event('final', result={
             'status': 'success',
