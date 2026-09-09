@@ -391,6 +391,17 @@
         </div>
     </div>
 
+    <!-- 阅卷记录查看弹窗（body 直接子元素，避免被 flex/overflow 裁剪） -->
+    <div id="record-overlay" class="preset-overlay">
+        <div class="preset-panel record-panel">
+            <div class="preset-panel-header">
+                <span>阅卷记录</span>
+                <button class="preset-panel-close" id="record-panel-close">×</button>
+            </div>
+            <div class="preset-panel-list" id="record-panel-list"></div>
+        </div>
+    </div>
+
     <!-- HTML 标记框 (body 直接子元素，避免被 container flex/overflow 裁剪) -->
     <div id="marker-card" class="html-marker" data-mtype="card">
         <button class="html-marker-close">×</button>

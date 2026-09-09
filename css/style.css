@@ -1413,3 +1413,57 @@
         .html-marker-close:hover {
             background: #dc3545;
         }
+
+        /* ---------- 阅卷记录面板 ---------- */
+        .record-panel {
+            width: 560px;
+            max-width: 90vw;
+        }
+        .record-item {
+            border: 1px solid #e5eaf3;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            background: #fbfcfe;
+        }
+        .record-item-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        .record-item-score {
+            color: #2e7d32;
+            font-weight: bold;
+            font-size: 16px;
+            white-space: nowrap;
+        }
+        .record-delete {
+            background: none;
+            border: none;
+            color: #d32f2f;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: auto;
+        }
+        .record-delete:hover {
+            text-decoration: underline;
+        }
+        .record-item-section {
+            font-size: 12px;
+            color: #888;
+            margin: 8px 0 2px;
+        }
+        .record-item-content {
+            font-size: 13px;
+            line-height: 1.7;
+            color: #333;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .record-panel .preset-panel-list {
+            max-height: 70vh;
+        }

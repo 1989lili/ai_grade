@@ -164,13 +164,16 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 获取当前选中服务商的配置（视觉直评内置，直接用服务商配置一次调用识别+评分）
+    // 获取当前选中服务商的配置（含 OCR 识别设置，一并用于保存预设）
     function getCurrentProviderConfig() {
         const selectedProvider = document.querySelector('.provider-select').value;
+        const ocr = getOcrSettings();
         return {
             provider: selectedProvider,
             apiKey: document.getElementById(`api-key-${selectedProvider}`).value,
-            modelName: document.getElementById(`model-name-${selectedProvider}`).value
+            modelName: document.getElementById(`model-name-${selectedProvider}`).value,
+            ocrMode: ocr.ocrMode,
+            ocrApiKey: ocr.ocrApiKey
         };
     }
 
@@ -1301,6 +1304,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 completed = completed + 1;
                 completedInput.value = completed;
                 updateProgress();
+                // ── 存档本份阅卷记录（fire-and-forget，失败不打断批改） ──
+                saveGradeRecord(analyzeResult, completed);
 
                 // 恢复标记（同步等 tk 线程真正显示完成，避免下一轮误判标记丢失）
                 if (markersHidden && api && api.show_marker_at) {
@@ -1397,6 +1402,111 @@ document.addEventListener('DOMContentLoaded', function() {
                 progressText2.textContent = '0 / ' + (parseInt(totalInput2 && totalInput2.value, 10) || 0);
             }
             resetGradingProgress();
+        });
+    }
+
+    // ---------- 阅卷记录：保存 + 查看 ----------
+    function gradeEsc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // 每份批改成功后存档（不阻塞主流程；失败仅记日志）
+    function saveGradeRecord(result, index) {
+        if (!result) return;
+        try {
+            fetch('/api/records/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    index: index,
+                    score: result.score,
+                    max_score: result.max_score,
+                    student_answer: result.student_answer || '',
+                    review_analysis: result.review_analysis || '',
+                    reasoning: result.reasoning || '',
+                    provider_label: result.provider_label || '',
+                    ocr_label: result.ocr_label || ''
+                })
+            }).catch(function() { /* 记录失败不影响批改 */ });
+        } catch (e) { /* 忽略 */ }
+    }
+
+    var recordOverlay = document.getElementById('record-overlay');
+    var recordPanelList = document.getElementById('record-panel-list');
+    var recordPanelClose = document.getElementById('record-panel-close');
+
+    function renderRecords(records) {
+        if (!recordPanelList) return;
+        recordPanelList.innerHTML = '';
+        if (!records || records.length === 0) {
+            recordPanelList.innerHTML = '<div class="preset-panel-empty">暂无阅卷记录</div>';
+            return;
+        }
+        records.forEach(function(r, pos) {
+            var head = '<span>' + gradeEsc(r.ts || '') +
+                       (r.index ? '　·　第 ' + gradeEsc(r.index) + ' 份' : '') + '</span>' +
+                       '<span class="record-item-score">' + gradeEsc(r.score) + ' / ' + gradeEsc(r.max_score) + ' 分</span>' +
+                       '<button class="record-delete" data-pos="' + pos + '">删除</button>';
+            var html = '<div class="record-item">' +
+                       '<div class="record-item-head">' + head + '</div>';
+            if (r.student_answer) {
+                html += '<div class="record-item-section">【学生作答】</div>' +
+                        '<div class="record-item-content">' + gradeEsc(r.student_answer) + '</div>';
+            }
+            if (r.review_analysis) {
+                html += '<div class="record-item-section">【阅卷评析】</div>' +
+                        '<div class="record-item-content">' + gradeEsc(r.review_analysis) + '</div>';
+            }
+            html += '</div>';
+            var item = document.createElement('div');
+            item.innerHTML = html;
+            recordPanelList.appendChild(item);
+        });
+        Array.prototype.forEach.call(recordPanelList.querySelectorAll('.record-delete'), function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (!confirm('确定删除这条阅卷记录？')) return;
+                fetch('/api/records/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pos: parseInt(btn.getAttribute('data-pos'), 10) })
+                }).then(function(r) { return r.json(); })
+                  .then(function(d) {
+                      if (d.status === 'success') loadRecords();
+                      else alert('删除失败：' + (d.message || '未知错误'));
+                  }).catch(function() { alert('删除失败，请重试'); });
+            });
+        });
+    }
+
+    function loadRecords() {
+        fetch('/api/records/list')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.status === 'success') renderRecords(d.records || []);
+                else recordPanelList.innerHTML = '<div class="preset-panel-empty">加载失败：' + gradeEsc(d.message || '') + '</div>';
+            })
+            .catch(function() { recordPanelList.innerHTML = '<div class="preset-panel-empty">加载失败，请稍后重试</div>'; });
+    }
+
+    // 底部【记录】按钮 → 打开阅卷记录面板
+    var recordBtn = document.querySelector('.action-btn.record');
+    if (recordBtn) {
+        recordBtn.addEventListener('click', function() {
+            if (!recordOverlay) return;
+            recordOverlay.classList.add('active');
+            loadRecords();
+        });
+    }
+    if (recordPanelClose) {
+        recordPanelClose.addEventListener('click', function() {
+            if (recordOverlay) recordOverlay.classList.remove('active');
+        });
+    }
+    if (recordOverlay) {
+        recordOverlay.addEventListener('click', function(e) {
+            if (e.target === recordOverlay) recordOverlay.classList.remove('active');
         });
     }
 
@@ -1506,6 +1616,17 @@ document.addEventListener('DOMContentLoaded', function() {
         var modelNameEl = document.getElementById('model-name-' + preset.provider);
         if (apiKeyEl) apiKeyEl.value = preset.apiKey || '';
         if (modelNameEl) modelNameEl.value = preset.modelName || '';
+
+        // 恢复 OCR 识别方式 与 OCR Key（预设里若有保存）
+        if (preset.ocrMode) {
+            var ocrSel = document.getElementById('ocr-mode-select');
+            if (ocrSel) {
+                ocrSel.value = preset.ocrMode;
+                ocrSel.dispatchEvent(new Event('change')); // 触发显隐与本地记忆
+            }
+            var ocrKeyEl = document.getElementById('ocr-zhipu-key');
+            if (ocrKeyEl) ocrKeyEl.value = preset.ocrApiKey || '';
+        }
     }
 
     function renderPresetPanel(presets) {
@@ -1623,6 +1744,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     if (modelNameElement) {
                         modelNameElement.value = preset.modelName;
+                    }
+                    // 恢复 OCR 识别方式与 OCR Key
+                    if (preset.ocrMode) {
+                        const ocrSel = document.getElementById('ocr-mode-select');
+                        if (ocrSel) {
+                            ocrSel.value = preset.ocrMode;
+                            ocrSel.dispatchEvent(new Event('change'));
+                        }
+                        const ocrKeyEl = document.getElementById('ocr-zhipu-key');
+                        if (ocrKeyEl) ocrKeyEl.value = preset.ocrApiKey || '';
                     }
                 }
             }
