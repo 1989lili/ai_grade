@@ -33,9 +33,6 @@
             <div id="ai-config-tab" class="tab-content">
                 <!-- 网络评分模型 -->
                 <div class="model-params-section network-model-section">
-                    <!-- 顶部提醒：视觉直评内置，需选用可识图的多模态模型 -->
-                    <div class="vision-tip-bar">⚠️ 请选用可识图的多模态模型</div>
-                    
                     <div class="model-params-header">
                         <h3>网络评分模型</h3>
                     </div>
@@ -131,7 +128,7 @@
                             <select id="ocr-mode-select" class="model-select">
                                 <option value="local">内置本地OCR（离线 · 免费 · 默认）</option>
                                 <option value="zhipu">智谱GLM-OCR（云端 · 手写最准）</option>
-                                <option value="vision">识图模型转录（需服务商支持识图）</option>
+                                <option value="vision">模型识图+阅卷</option>
                             </select>
                         </div>
                         <div class="config-item" id="ocr-zhipu-key-item" style="display: none;">

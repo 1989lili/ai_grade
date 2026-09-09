@@ -161,7 +161,43 @@ document.addEventListener('DOMContentLoaded', function() {
                 apiUrlLink.href = 'https://open.bigmodel.cn/';
                 apiUrlLink.textContent = 'https://open.bigmodel.cn/';
             }
+
+            // 按模型是否多模态联动“识别方式”默认值
+            scheduleOcrDefaultSync();
         });
+    }
+
+    // 根据公开信息维护的“可识图（多模态）模型”识别：
+    // 命中以下特征 → 默认【模型识图+阅卷】；其余（如 DeepSeek 全系文本模型、
+    // 豆包非 vision 的对话模型、智谱 glm-4-flash 等）→ 默认【智谱GLM-OCR】。
+    function modelCanSeeImages(provider, model) {
+        model = (model || '').trim().toLowerCase();
+        if (!model) return null;                       // 还没填模型名，不做判断
+        if (provider === 'deepseek') return false;     // DeepSeek 公开模型均为纯文本
+        if (/vision|glm-4v|4v-flash|4v-plus|1\.5-vision|seed-2/.test(model)) return true;
+        if (provider === 'zhipu') {
+            // 智谱文本模型：glm-4-flash / glm-4-air / glm-4-plus 等
+            return /^glm-4v/i.test(model);
+        }
+        return false;
+    }
+
+    function scheduleOcrDefaultSync() {
+        setTimeout(function() {
+            var ocrSel = document.getElementById('ocr-mode-select');
+            var providerSel = document.querySelector('.provider-select');
+            if (!ocrSel || !providerSel) return;
+            var provider = providerSel.value;
+            var modelInput = document.getElementById('model-name-' + provider);
+            var model = modelInput ? modelInput.value.trim() : '';
+            var canSee = modelCanSeeImages(provider, model);
+            if (canSee === null) return;               // 未填模型名时不擅自改动
+            var target = canSee ? 'vision' : 'zhipu';
+            if (ocrSel.value !== target) {
+                ocrSel.value = target;
+                ocrSel.dispatchEvent(new Event('change'));
+            }
+        }, 30);
     }
 
     // 获取当前选中服务商的配置（含 OCR 识别设置，一并用于保存预设）
@@ -1065,6 +1101,15 @@ document.addEventListener('DOMContentLoaded', function() {
         sel.addEventListener('change', sync);
         sync();
     })();
+
+    // 模型名称改动 → 按是否多模态联动“识别方式”默认值
+    ['doubao', 'deepseek', 'zhipu'].forEach(function(p) {
+        var el = document.getElementById('model-name-' + p);
+        if (el) {
+            el.addEventListener('change', scheduleOcrDefaultSync);
+            el.addEventListener('input', scheduleOcrDefaultSync);
+        }
+    });
 
     // mode：'auto' 整批批改（默认）；'one' 调试模式——只批当前这一张，
     // 不填写/不点击提交，不递增已改数量，也不进入下一张。

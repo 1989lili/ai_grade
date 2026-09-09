@@ -793,20 +793,6 @@
             text-decoration: underline;
         }
         
-        /* 顶部提醒：请选用可识图的大模型 */
-        .vision-tip-bar {
-            margin: 0 0 16px 0;
-            padding: 10px 14px;
-            background: #fff8e1;
-            border: 1px solid #f0c36d;
-            border-left: 4px solid #f9a825;
-            border-radius: 6px;
-            color: #7a5c00;
-            font-size: 13px;
-            font-weight: bold;
-            line-height: 1.6;
-        }
-
         /* 服务商配置区块共用 */
         .provider-config {
             margin-bottom: 20px;
