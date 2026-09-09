@@ -20,11 +20,13 @@ try:
     from .license import is_activated, validate_license_key, store_license
     from .activation_ui import ACTIVATION_HTML
     from .hwid import generate_hwid
+    from .paths import get_app_data_dir, data_file
 except ImportError:
     from crypto import secure_read_json, secure_write_json  # type: ignore
     from license import is_activated, validate_license_key, store_license  # type: ignore
     from activation_ui import ACTIVATION_HTML  # type: ignore
     from hwid import generate_hwid  # type: ignore
+    from paths import get_app_data_dir, data_file  # type: ignore
 
 app = Flask(__name__)
 app.secret_key = 'ai_grade_admin_secret_2026'
@@ -35,12 +37,8 @@ ACTIVATED = False
 # ---------- 日志配置 ----------
 
 def setup_logging():
-    """配置文件日志到 exe 同级目录，支持轮转（单文件最大 5MB，保留 3 个备份）。"""
-    if getattr(sys, 'frozen', False):
-        log_dir = os.path.dirname(sys.executable)
-    else:
-        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'dist')
-    os.makedirs(log_dir, exist_ok=True)
+    """配置文件日志到 %APPDATA%\\AI_Grader，支持轮转（单文件最大 5MB，保留 3 个备份）。"""
+    log_dir = get_app_data_dir()
     log_file = os.path.join(log_dir, 'ai_grade.log')
 
     logger = logging.getLogger('ai_grade')
@@ -50,10 +48,16 @@ def setup_logging():
 
     fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
+    try:
+        fh = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    except Exception:
+        # 日志文件被占用（例如有实例正在退出、杀软扫描）绝不能让程序起不来，
+        # 退化为只写控制台。
+        if not getattr(sys, 'frozen', False):
+            raise
 
     # 开发模式下也输出到控制台
     if not getattr(sys, 'frozen', False):
@@ -84,7 +88,12 @@ else:
     BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-PRESETS_FILE = os.path.join(EXE_DIR, 'presets.json')
+# 预设与评分标准模板统一存放在 %APPDATA%\AI_Grader（老位置的文件会自动迁移过来）
+PRESETS_FILE = data_file('presets.json')
+
+# 评分标准模板（题目材料/参考答案/评价示例/评分要求 整组保存）
+SCORING_TEMPLATES_FILE = data_file('scoring_templates.json')
+MAX_SCORING_TEMPLATES = 100
 
 # ---------- 静态文件服务 ----------
 
@@ -231,9 +240,9 @@ LLM_READ_TIMEOUT = 30
 LLM_MAX_RETRIES = 1
 LLM_RETRY_BACKOFF_SECONDS = 2
 LLM_MAX_TOKENS = 1024
-LLM_STREAM_MAX_TOKENS = 400
-# 流式调用首包（首个 token 或 reasoning 片段）必须在该秒数内到达，否则视为超时
-LLM_FIRST_BYTE_TIMEOUT = 8
+# 流式评分输出上限。注意：智谱 GLM-4V 系列 max_tokens 上限就是 1024，
+# 设更大会被服务端直接拒成 HTTP 400，所以这里取 1024（已足够容纳“逐字转录 + 逐点评析 + JSON”）。
+LLM_STREAM_MAX_TOKENS = 1024
 
 
 class GradingError(Exception):
@@ -249,12 +258,18 @@ from grading_prompts import (
     GRADING_SYSTEM_PROMPT,
     GRADING_STREAM_SYSTEM_PROMPT,
     GRADING_TEXT_STREAM_SYSTEM_PROMPT,
+    GRADING_OCR_SYSTEM_PROMPT,
 )
 
 try:
     from .local_ocr import call_local_ocr, LocalOCRError
 except ImportError:
     from local_ocr import call_local_ocr, LocalOCRError  # type: ignore
+
+try:
+    from .zhipu_ocr import call_handwriting_ocr, OCRError as ZhipuOCRError
+except ImportError:
+    from zhipu_ocr import call_handwriting_ocr, OCRError as ZhipuOCRError  # type: ignore
 
 
 def html_to_text(value):
@@ -308,15 +323,26 @@ def build_grading_messages(image_base64, standards, streaming=False, image_mime_
         text_parts.append(f"【评分要求】\n{requirement}")
 
     if streaming:
+        # 两段式第二步：识别文本 + 评分标准 → 评分（流式）。
+        # 关键：要求模型用“纯文本 + 固定标签行”分段输出，绝不允许 JSON / Markdown 代码块，
+        # 这样每个 token 都能实时上屏（真正的流式效果），解析也只依赖几个标签行。
         text_parts.append(
-            "请快速评分。开头必须直接输出：得分：<score>/<max_score>，简评：<一句话>。"
-            "不要输出铺垫语、思考过程或 Markdown。最后一行输出一个可解析的 JSON：\n"
-            "{\"student_answer\":\"<原作答>\",\"review_analysis\":\"<1-2句>\",\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<一句话依据>\"}"
+            "请严格按下面的纯文本格式输出，禁止 JSON、禁止 Markdown 代码块、禁止 ``` 符号：\n"
+            "\n"
+            "得分：<score>/<max_score>\n"
+            "学生作答：<把上面的学生作答原文原样放回>\n"
+            "阅卷评析：<按评分点说明学生答了什么→是否符合要点→得/扣几分及原因，最后一句汇总>\n"
+            "\n"
+            "要求：\n"
+            "- 四行各自单独一行，标签后紧跟冒号（中英文均可）\n"
+            "- 得分里的 score、max_score 只能是数字\n"
+            "- 不要输出任何 JSON 大括号、代码块或前后缀说明"
         )
     else:
         text_parts.append(
             "只返回 JSON："
-            "{\"student_answer\":\"<作答>\",\"review_analysis\":\"<评析>\",\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<依据>\"}"
+            "{\"student_answer\":\"<逐字转录学生作答>\",\"review_analysis\":\"<逐点评析，说明为什么得这个分>\","
+            "\"score\":<数字>,\"max_score\":<数字>,\"reasoning\":\"<一句话总评>\"}"
         )
 
     parts.append({"type": "text", "text": "\n\n".join(text_parts)})
@@ -342,17 +368,27 @@ def get_provider_api_url(provider):
 
 
 def raise_for_model_status(response):
+    """把模型服务的 HTTP 错误翻译成可操作的提示，并保留服务端原始报错便于排查。"""
     status = response.status_code
     if status < 400:
         return
+    # 关键：400 这类错误必须把服务端返回的原因带出来，否则界面上只剩“HTTP状态码400”无法定位
+    try:
+        body = (response.text or '').strip().replace('\n', ' ')
+    except Exception:
+        body = ''
+    if len(body) > 300:
+        body = body[:300] + '...'
+    log.warning('模型服务返回 HTTP %s，响应体：%s', status, body or '(空)')
+    suffix = f'（{body}）' if body else ''
     if status in (401, 403):
-        raise GradingError('API Key无效或无权限，请检查AI配置。', code='model_auth_error', status_code=400)
+        raise GradingError('API Key无效或无权限，请检查AI配置。' + suffix, code='model_auth_error', status_code=400)
     if status == 429:
-        raise GradingError('模型服务限流，请稍后重试。', code='model_rate_limited', status_code=502)
+        raise GradingError('模型服务限流，请稍后重试。' + suffix, code='model_rate_limited', status_code=502)
     if status in (408, 500, 502, 503, 504):
-        raise GradingError('模型服务暂时异常，请稍后重试。', code='model_server_error', status_code=502,
+        raise GradingError('模型服务暂时异常，请稍后重试。' + suffix, code='model_server_error', status_code=502,
                            detail=f'HTTP {status}')
-    raise GradingError(f'模型服务请求失败，HTTP状态码：{status}', code='model_http_error', status_code=502)
+    raise GradingError(f'模型服务请求失败，HTTP状态码：{status}' + suffix, code='model_http_error', status_code=502)
 
 
 def make_grading_payload(model_name, image_base64, standards, streaming=False, image_mime_type='image/png',
@@ -460,6 +496,47 @@ def call_llm_for_grading(provider, api_key, model_name, image_base64, standards,
                        detail=str(last_error) if last_error else None)
 
 
+def call_llm_ocr(provider, api_key, model_name, image_base64, image_mime_type='image/jpeg'):
+    """第一步：调用识图模型把学生手写作答转录成纯文本（只识别，不评分）。"""
+    api_url = get_provider_api_url(provider)
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": f"Bearer {api_key}"
+    }
+    payload = {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": GRADING_OCR_SYSTEM_PROMPT},
+            {"role": "user", "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{image_mime_type};base64,{image_base64}"}
+                },
+                {"type": "text", "text": "请逐字转录这张答题卡截图中学生的手写作答内容。"}
+            ]}
+        ],
+        "temperature": 0,
+        "top_p": 0.1,
+        "max_tokens": LLM_MAX_TOKENS
+    }
+    started = time.monotonic()
+    log.info('识图模型转录请求: provider=%s model=%s', provider, model_name)
+    response = requests.post(api_url, headers=headers, json=payload,
+                             timeout=(LLM_CONNECT_TIMEOUT, LLM_READ_TIMEOUT))
+    raise_for_model_status(response)
+    data = response.json()
+    choices = data.get('choices') or []
+    if not choices:
+        raise GradingError('识图模型未返回识别结果。', code='model_empty_response', status_code=502)
+    message = choices[0].get('message') or {}
+    text = (message.get('content') or '').strip()
+    # 部分模型把正文放在 reasoning_content 里
+    if not text:
+        text = (message.get('reasoning_content') or '').strip()
+    log.info('识图模型转录完成, 字数=%d, 耗时=%d ms', len(text), int((time.monotonic() - started) * 1000))
+    return text
+
+
 def stream_llm_for_grading(provider, api_key, model_name, image_base64, standards, out_queue,
                            image_mime_type='image/png', ocr_text=None):
     """流式调用大模型，将 token/error/done 事件放入队列。"""
@@ -534,6 +611,9 @@ def stream_llm_for_grading(provider, api_key, model_name, image_base64, standard
                     out_queue.put({'type': 'token', 'content': content})
 
             full_text = ''.join(content_parts)
+            # 清理 markdown 代码块标记（防止出现 ```json ... ```）
+            full_text = re.sub(r'```(?:json)?\s*\n?', '', full_text, flags=re.IGNORECASE)
+            full_text = re.sub(r'\n\s*```', '', full_text, flags=re.IGNORECASE)
             if not full_text:
                 raise GradingError('模型响应为空，请稍后重试。', code='model_empty_response', status_code=502)
             out_queue.put({
@@ -578,7 +658,9 @@ def stream_llm_for_grading(provider, api_key, model_name, image_base64, standard
                                                              detail=str(exc))})
             return
         except GradingError as exc:
-            if attempt < total_attempts and not emitted_token:
+            # 4xx（参数不合法/鉴权失败）重试必然同样失败，直接报错；只有服务端异常、限流才重试
+            retryable = exc.code in ('model_server_error', 'model_rate_limited')
+            if attempt < total_attempts and not emitted_token and retryable:
                 time.sleep(LLM_RETRY_BACKOFF_SECONDS * attempt)
                 continue
             out_queue.put({'type': 'error', 'error': exc})
@@ -642,16 +724,32 @@ def parse_score(response_text):
         except json.JSONDecodeError:
             pass
 
+    # 纯文本分段格式（流式主用）："得分：x/y" + "学生作答：…" + "阅卷评析：…"
+    def extract_labeled(content, label):
+        """提取 “标签：…” 开头到下一个已知标签之前的内容；支持【】包裹的标签。"""
+        if not content:
+            return ''
+        m = re.search(r'(?:【)?' + re.escape(label) + r'(?:】)?\s*[:：]', content)
+        if not m:
+            return ''
+        rest = content[m.end():]
+        others = tuple(l for l in ('阅卷评析', '学生作答', '成绩得分', '得分', '评分结论',
+                                   '评分要求', 'reasoning', 'score', 'max_score') if l != label)
+        nxt = None
+        for other in others:
+            _m = re.search(r'(?:【)?' + re.escape(other) + r'(?:】)?\s*[:：]', rest)
+            if _m:
+                nxt = _m.start() if nxt is None else min(nxt, _m.start())
+        block = rest[:nxt] if nxt is not None else rest
+        return block.strip(' \t\r\n')
+
     # 尝试中文格式：得分: 8/10、分数: 8
     cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
     if cn_match:
-        # 尝试提取简评/评析内容
-        review_analysis = ''
-        ra_match = re.search(r'(?:简评|评析)[:：]\s*(.+?)(?:\n|。|$)', text)
-        if ra_match:
-            review_analysis = ra_match.group(1).strip()
         return {'score': float(cn_match.group(1)), 'max_score': int(cn_match.group(2)),
-                'reasoning': text, 'student_answer': '', 'review_analysis': review_analysis}
+                'reasoning': text,
+                'student_answer': extract_labeled(text, '学生作答'),
+                'review_analysis': extract_labeled(text, '阅卷评析')}
 
     # 尝试纯数字：8/10
     num_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
@@ -912,11 +1010,16 @@ def stream_analyze_card_grading(data):
     api_key = data.get('apiKey', '')
     model_name = data.get('modelName', '')
     provider = data.get('provider', '')
-    # 视觉直评内置（默认）：直接用所选服务商的模型一次调用完成识别+评分；本地 OCR 仅作离线兜底
-    ocr_mode = data.get('ocrMode', 'vision')
-
-    if ocr_mode not in ('vision', 'local'):
-        ocr_mode = 'vision'
+    # 识别方式（两段式第一步）：
+    #   local  = 内置离线 OCR（RapidOCR / PP-OCRv3，免费、不联网，默认）
+    #   zhipu  = 智谱 GLM-OCR 云端手写识别（精度最好，需智谱 Key + 联网）
+    #   vision = 用所选服务商的识图模型只做转录（DeepSeek 等纯文本模型不可用）
+    # 三种方式拿到文字后，都再交给评分模型结合「题目材料/参考答案/评分要求」打分；
+    # 任一识别方式失败都会自动降级为内置本地 OCR，保证批改不中断。
+    ocr_mode = (data.get('ocrMode') or 'local').strip().lower()
+    if ocr_mode not in ('local', 'zhipu', 'vision'):
+        ocr_mode = 'local'
+    ocr_api_key = data.get('ocrApiKey', '') or (api_key if provider == 'zhipu' else '')
 
     if not api_key:
         yield ndjson_event('error', code='missing_api_key', message='请先在AI配置页面填写API Key')
@@ -946,49 +1049,73 @@ def stream_analyze_card_grading(data):
         yield ndjson_event('error', code='capture_failed', message=f'截图答题卡失败：{exc}')
         return
 
-    # ── 识别阶段：视觉直评内置（默认），直接调用所选服务商的模型一次完成识别+评分 ──
+    # ── 第一步：识别学生作答（必须先拿到文字，才谈得上评分） ──
+    image_bytes = base64.b64decode(image_b64)
     ocr_text = ''
-    ocr_result = None
-    ocr_ms = 0
-    ocr_label = '视觉直评-' + model_name if ocr_mode == 'vision' else ''
-    if ocr_mode == 'vision':
-        yield ndjson_event('status', message=f'正在调用视觉模型 {model_name} 识别并评分...')
+    ocr_words = 0
+    ocr_label = ''
+    ocr_mode_used = ocr_mode
+    ocr_started = time.monotonic()
+
+    if ocr_mode == 'zhipu':
+        yield ndjson_event('status', message='正在调用智谱 GLM-OCR 识别手写作答...')
+        try:
+            ocr_result = call_handwriting_ocr(ocr_api_key, image_bytes, mime_type=image_mime)
+            ocr_text = ocr_result['text']
+            ocr_words = ocr_result['words_count']
+            ocr_label = '智谱GLM-OCR'
+        except Exception as exc:
+            reason = getattr(exc, 'message', None) or str(exc)
+            log.warning('智谱 GLM-OCR 失败，降级内置本地 OCR: %s', reason)
+            yield ndjson_event('status', message=f'智谱OCR不可用（{reason}），改用内置本地OCR识别...')
+            ocr_mode_used = 'local'
+    elif ocr_mode == 'vision':
+        yield ndjson_event('status', message=f'正在调用 {model_name} 转录学生作答...')
+        try:
+            ocr_text = call_llm_ocr(provider, api_key, model_name, image_b64, image_mime)
+            ocr_words = len(ocr_text or '')
+            ocr_label = '识图模型-' + model_name
+        except Exception as exc:
+            reason = getattr(exc, 'message', None) or str(exc)
+            log.warning('识图模型转录失败，降级内置本地 OCR: %s', reason)
+            yield ndjson_event('status', message='识图模型转录失败，改用内置本地OCR识别...')
+            ocr_mode_used = 'local'
     else:
-        image_bytes = base64.b64decode(image_b64)
-        yield ndjson_event('status', message='正在调用本地 OCR 引擎识别手写文字...')
-        ocr_started = time.monotonic()
+        ocr_mode_used = 'local'
+
+    if ocr_mode_used == 'local':
+        yield ndjson_event('status', message='正在调用内置本地 OCR 识别手写作答...')
         try:
             ocr_result = call_local_ocr(image_bytes, mime_type=image_mime)
-            ocr_label = '本地OCR'
             ocr_text = ocr_result['text']
-            ocr_ms = int((time.monotonic() - ocr_started) * 1000)
-            log.info('%s 完成, 字数=%d, 耗时=%d ms', ocr_label, len(ocr_text), ocr_ms)
-            yield ndjson_event('timing', key='ocr', label=ocr_label, duration_ms=ocr_ms,
-                               words_count=ocr_result['words_count'], ocr_mode=ocr_mode)
-            # 整体文本事件（前端「学生作答」区缓存）+ 逐行事件（打字机实时上屏）
-            yield ndjson_event('ocr_text', text=ocr_text, words_count=ocr_result['words_count'],
-                               ocr_mode=ocr_mode, label=ocr_label)
-            for _line in ocr_text.split('\n'):
-                yield ndjson_event('ocr_text_chunk', line=_line, ocr_mode=ocr_mode)
-            if not ocr_text.strip():
-                yield ndjson_event('error', code='ocr_empty_result',
-                                   message='OCR 未识别到手写作答，请确认框选范围或调整图片')
-                return
+            ocr_words = ocr_result['words_count']
+            ocr_label = '内置本地OCR'
         except LocalOCRError as exc:
-            log.warning('本地 OCR 失败: %s', exc.message)
             yield ndjson_event('error', code=exc.code, message=exc.message)
             return
         except Exception as exc:
-            log.exception('OCR 调用异常')
+            log.exception('本地 OCR 调用异常')
             yield ndjson_event('error', code='ocr_failed', message=f'OCR 调用失败：{exc}')
             return
 
-    # ── AI 评分（流式） ──
+    ocr_ms = int((time.monotonic() - ocr_started) * 1000)
+    ocr_text = (ocr_text or '').strip()
+    log.info('识别完成[%s]: 字数=%d, 耗时=%d ms', ocr_label, len(ocr_text), ocr_ms)
+    yield ndjson_event('timing', key='ocr', label=ocr_label, duration_ms=ocr_ms,
+                       words_count=ocr_words, ocr_mode=ocr_mode_used)
+    # 整体文本事件（前端缓存）+ 逐行事件（打字机实时上屏）
+    yield ndjson_event('ocr_text', text=ocr_text, words_count=ocr_words,
+                       ocr_mode=ocr_mode_used, label=ocr_label)
+    for _line in ocr_text.split('\n'):
+        yield ndjson_event('ocr_text_chunk', line=_line, ocr_mode=ocr_mode_used)
+    if not ocr_text:
+        yield ndjson_event('error', code='ocr_empty_result',
+                           message='OCR 未识别到手写作答，请确认框选范围或调整图片')
+        return
+
+    # ── 第二步：识别文本 + 题目材料/参考答案/评分要求 → 评分模型打分（流式） ──
     model_provider, model_key, model_call = provider, api_key, model_name
-    if ocr_mode == 'vision':
-        yield ndjson_event('status', message=f'正在调用 {model_name} 视觉直评...')
-    else:
-        yield ndjson_event('status', message='OCR 完成，正在调用评分模型...')
+    yield ndjson_event('status', message='识别完成，正在结合评分标准打分...')
     model_started = time.monotonic()
     model_queue = queue.Queue()
     worker = threading.Thread(
@@ -1010,12 +1137,7 @@ def stream_analyze_card_grading(data):
             item = model_queue.get(timeout=1)
         except queue.Empty:
             elapsed_ms = int((time.monotonic() - model_started) * 1000)
-            # 首包超时熔断：模型尚未吐出任何内容
-            if not first_byte_seen and elapsed_ms >= LLM_FIRST_BYTE_TIMEOUT * 1000:
-                log.warning('首包超时 %d ms（阈值 %d ms），熔断', elapsed_ms, LLM_FIRST_BYTE_TIMEOUT * 1000)
-                yield ndjson_event('error', code='model_first_byte_timeout',
-                                   message=f'模型 {LLM_FIRST_BYTE_TIMEOUT}s 内未返回内容，已熔断')
-                return
+            # 已移除“首包 8s 未返回即熔断”：模型慢一些也继续等，只按秒回传等待状态
             yield ndjson_event('status',
                                message=f'AI正在识别评分，已等待 {elapsed_ms // 1000} 秒...',
                                elapsed_ms=elapsed_ms)
@@ -1085,7 +1207,7 @@ def stream_analyze_card_grading(data):
             'total_ms': total_ms,
             'input_bytes': image_meta.get('input_bytes'),
             'output_bytes': image_meta.get('output_bytes'),
-            'ocr_mode': ocr_mode,
+            'ocr_mode': ocr_mode_used,
         }
 
         provider_label_map = {
@@ -1105,8 +1227,8 @@ def stream_analyze_card_grading(data):
             'full_text': full_text,
             'ocr_text': ocr_text,
             'provider_label': provider_label,
-            'ocr_label': ocr_label or '视觉直评',
-            'ocr_mode': ocr_mode,
+            'ocr_label': ocr_label or '内置本地OCR',
+            'ocr_mode': ocr_mode_used,
             'timings': timings,
         })
     except Exception as exc:
@@ -1263,6 +1385,84 @@ def delete_preset():
         if last and last not in presets:
             presets_data['last_preset'] = presets[-1] if presets else None
         secure_write_json(PRESETS_FILE, presets_data)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+# ---------- 评分标准模板管理 ----------
+
+def _load_scoring_templates():
+    """读取评分标准模板文件；文件缺失/损坏时返回空列表。"""
+    try:
+        templates_data = secure_read_json(SCORING_TEMPLATES_FILE)
+    except Exception:
+        return []
+    if isinstance(templates_data, dict) and isinstance(templates_data.get('templates'), list):
+        return templates_data['templates']
+    return []
+
+
+def _save_scoring_templates(templates):
+    secure_write_json(SCORING_TEMPLATES_FILE, {'templates': templates})
+
+
+@app.route('/api/save-scoring-template', methods=['POST'])
+def save_scoring_template():
+    """保存当前整组评分标准（material/answer/example/requirement）为一个模板。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        name = (data.get('name') or '').strip()
+        material = data.get('material') or ''
+        answer = data.get('answer') or ''
+        example = data.get('example') or ''
+        requirement = data.get('requirement') or ''
+
+        if not (material or answer or example or requirement):
+            return jsonify({'status': 'error', 'message': '评分标准内容为空，未保存'})
+
+        if not name:
+            name = '模板 ' + datetime.datetime.now().strftime('%m-%d %H:%M')
+
+        templates = _load_scoring_templates()
+        entry = {
+            'name': name,
+            'material': material,
+            'answer': answer,
+            'example': example,
+            'requirement': requirement,
+            'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
+        }
+        templates.append(entry)
+        # 只保留最近 MAX_SCORING_TEMPLATES 条，防止文件无限膨胀
+        if len(templates) > MAX_SCORING_TEMPLATES:
+            templates = templates[-MAX_SCORING_TEMPLATES:]
+        _save_scoring_templates(templates)
+        return jsonify({'status': 'success', 'template': entry})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@app.route('/api/get-scoring-templates', methods=['GET'])
+def get_scoring_templates():
+    """返回全部模板，按保存顺序 旧→新；前端默认展示最近5个。"""
+    try:
+        return jsonify({'status': 'success', 'templates': _load_scoring_templates()})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@app.route('/api/delete-scoring-template', methods=['POST'])
+def delete_scoring_template():
+    """按数组下标（旧→新）删除模板。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        index = data.get('index')
+        templates = _load_scoring_templates()
+        if not isinstance(index, int) or index < 0 or index >= len(templates):
+            return jsonify({'status': 'error', 'message': '无效的模板索引'})
+        templates.pop(index)
+        _save_scoring_templates(templates)
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})

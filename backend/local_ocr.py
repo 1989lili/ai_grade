@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
-"""本地 OCR 引擎 —— PP-OCRv3 中文识别，纯离线运行，无需云端。
+"""本地 OCR 引擎 —— RapidOCR（PP-OCRv4 中文检测/识别 + v2.0 方向分类）跑在 ONNX Runtime 上，纯离线。
 
-基于 RapidOCR (ONNX Runtime)，首次调用自动加载模型，后续调用直接推理。
-模型文件随 PyInstaller 打包进 EXE，无需额外下载。
+- 随包模型（dist/_internal/rapidocr_onnxruntime/models/）：
+    ch_PP-OCRv4_det_infer.onnx  文本检测  ~4.6MB
+    ch_PP-OCRv4_rec_infer.onnx  文本识别  ~10.6MB
+    ch_ppocr_mobile_v2.0_cls_infer.onnx 方向分类 ~0.6MB
+- 首次调用自动加载模型（启动时后台预热），后续调用直接推理，不联网、不上传任何图片。
+- 依赖 onnxruntime / opencv / numpy，这也是整包体积（_internal 约 225MB）的主要来源；
+  PyInstaller onedir 模式下 AI_Grader.exe 只是启动器（约 9MB），代码与模型都在 _internal 里。
 """
 
 import logging
 import threading
+import time
 
 log = logging.getLogger('ai_grade')
 
@@ -14,6 +20,7 @@ _engine = None
 _lock = threading.Lock()
 _ready = False
 _error = None
+_warmup_started = False
 
 
 def _get_engine():
@@ -37,7 +44,7 @@ def _get_engine():
                 width_height_ratio=10,
             )
             _ready = True
-            log.info('本地 OCR 引擎就绪 (PP-OCRv3 / ONNX)')
+            log.info('本地 OCR 引擎就绪 (RapidOCR PP-OCRv4 / ONNX)')
             return _engine
         except Exception as exc:
             _error = f'本地 OCR 初始化失败: {exc}'
@@ -45,23 +52,31 @@ def _get_engine():
             raise RuntimeError(_error) from exc
 
 
-def _prefetch():
-    """后台预加载模型，减少首次调用延迟。"""
-    try:
-        import numpy as np
-        engine = _get_engine()
-        engine(np.zeros((100, 100, 3), dtype='uint8'))
-        log.info('本地 OCR 预热完成')
-    except Exception:
-        pass
+def warmup_async(delay=0.0):
+    """后台预热 OCR 引擎（幂等，不阻塞调用方）。
 
+    必须由调用方在 **UI 已经显示之后** 触发，不要在模块 import 时自动跑：
+    加载 cv2/onnxruntime 与两个 ONNX 模型要几百 MB 磁盘读取和满核 CPU，
+    和窗口创建、WebView2 初始化抢资源会明显拖慢首屏。
+    未预热也不影响正确性：首次识别时 `_get_engine()` 会同步加载。
+    """
+    global _warmup_started
+    if _warmup_started or _ready:
+        return
+    _warmup_started = True
 
-# 启动后台预加载
-import _thread
-try:
-    _thread.start_new_thread(_prefetch, ())
-except Exception:
-    pass
+    def _run():
+        if delay:
+            time.sleep(delay)
+        try:
+            import numpy as np
+            engine = _get_engine()
+            engine(np.zeros((100, 100, 3), dtype='uint8'))
+            log.info('本地 OCR 预热完成')
+        except Exception:
+            log.warning('本地 OCR 预热失败，首次批改时会重试', exc_info=True)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 class LocalOCRError(Exception):
