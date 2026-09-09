@@ -95,6 +95,10 @@ PRESETS_FILE = data_file('presets.json')
 SCORING_TEMPLATES_FILE = data_file('scoring_templates.json')
 MAX_SCORING_TEMPLATES = 100
 
+# 阅卷记录：每份答题卡的批改结果都存档，可点「记录」回看
+GRADE_RECORDS_FILE = data_file('grade_records.json')
+MAX_GRADE_RECORDS = 500
+
 # ---------- 静态文件服务 ----------
 
 @app.route('/', defaults={'path': ''})
@@ -326,16 +330,18 @@ def build_grading_messages(image_base64, standards, streaming=False, image_mime_
         # 两段式第二步：识别文本 + 评分标准 → 评分（流式）。
         # 关键：要求模型用“纯文本 + 固定标签行”分段输出，绝不允许 JSON / Markdown 代码块，
         # 这样每个 token 都能实时上屏（真正的流式效果），解析也只依赖几个标签行。
+        # 顺序固定为 学生作答 → 阅卷评析 → 成绩得分（最后一行），“学生作答”前不允许任何输出。
         text_parts.append(
             "请严格按下面的纯文本格式输出，禁止 JSON、禁止 Markdown 代码块、禁止 ``` 符号：\n"
             "\n"
-            "得分：<score>/<max_score>\n"
             "学生作答：<把上面的学生作答原文原样放回>\n"
             "阅卷评析：<按评分点说明学生答了什么→是否符合要点→得/扣几分及原因，最后一句汇总>\n"
+            "成绩得分：<score>/<max_score>\n"
             "\n"
             "要求：\n"
-            "- 四行各自单独一行，标签后紧跟冒号（中英文均可）\n"
-            "- 得分里的 score、max_score 只能是数字\n"
+            "- 顺序必须是上面三行：先学生作答、再阅卷评析、最后成绩得分，各占一行，标签后紧跟冒号\n"
+            "- 成绩得分必须是最后一行；成绩得分里的 score、max_score 只能是数字\n"
+            "- 在“学生作答：”之前不要输出任何内容（不要得分行、不要标题、不要铺垫语）\n"
             "- 不要输出任何 JSON 大括号、代码块或前后缀说明"
         )
     else:
@@ -743,8 +749,8 @@ def parse_score(response_text):
         block = rest[:nxt] if nxt is not None else rest
         return block.strip(' \t\r\n')
 
-    # 尝试中文格式：得分: 8/10、分数: 8
-    cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
+    # 尝试中文格式：成绩得分: 8/10、得分: 8/10、分数: 8
+    cn_match = re.search(r'(?:成绩得分|得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+)', text)
     if cn_match:
         return {'score': float(cn_match.group(1)), 'max_score': int(cn_match.group(2)),
                 'reasoning': text,
@@ -772,7 +778,7 @@ def extract_partial_score(text):
     if not text:
         return None
 
-    cn_match = re.search(r'(?:得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)', text)
+    cn_match = re.search(r'(?:成绩得分|得分|分数|成绩)[:：]\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)', text)
     if cn_match:
         return {'score': float(cn_match.group(1)), 'max_score': float(cn_match.group(2))}
 
@@ -1329,6 +1335,8 @@ def save_preset():
             'apiKey': api_key,
             'modelName': model_name,
             'provider': provider,
+            'ocrMode': data.get('ocrMode', '') or '',
+            'ocrApiKey': data.get('ocrApiKey', '') or '',
             'timestamp': datetime.datetime.now().isoformat()
         }
 
@@ -1385,6 +1393,77 @@ def delete_preset():
         if last and last not in presets:
             presets_data['last_preset'] = presets[-1] if presets else None
         secure_write_json(PRESETS_FILE, presets_data)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+# ---------- 阅卷记录管理 ----------
+
+def _load_grade_records():
+    try:
+        data = secure_read_json(GRADE_RECORDS_FILE)
+    except Exception:
+        return []
+    if isinstance(data, dict) and isinstance(data.get('records'), list):
+        return data['records']
+    return []
+
+
+def _save_grade_records(records):
+    secure_write_json(GRADE_RECORDS_FILE, {'records': records})
+
+
+@app.route('/api/records/add', methods=['POST'])
+def record_add():
+    """新增一条阅卷记录（每份答题卡批改完成后前端调用一次）。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        record = {
+            'ts': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'index': data.get('index'),
+            'score': data.get('score'),
+            'max_score': data.get('max_score'),
+            'student_answer': (data.get('student_answer') or ''),
+            'review_analysis': (data.get('review_analysis') or ''),
+            'reasoning': (data.get('reasoning') or ''),
+            'provider_label': (data.get('provider_label') or ''),
+            'ocr_label': (data.get('ocr_label') or ''),
+        }
+        records = _load_grade_records()
+        records.append(record)
+        # 只保留最近 MAX_GRADE_RECORDS 条，防止文件无限膨胀
+        if len(records) > MAX_GRADE_RECORDS:
+            records = records[-MAX_GRADE_RECORDS:]
+        _save_grade_records(records)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@app.route('/api/records/list', methods=['GET'])
+def record_list():
+    """返回全部阅卷记录，最新在前。"""
+    try:
+        records = _load_grade_records()
+        return jsonify({'status': 'success', 'records': list(reversed(records))})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@app.route('/api/records/delete', methods=['POST'])
+def record_delete():
+    """删除阅卷记录（按最新在前列表中的下标）。"""
+    try:
+        data = request.get_json(silent=True) or {}
+        pos = data.get('pos')  # 0 = 最新一条
+        records = _load_grade_records()
+        if not isinstance(pos, int) or pos < 0 or pos >= len(records):
+            return jsonify({'status': 'error', 'message': '无效的记录序号'})
+        reversed_records = list(reversed(records))
+        removed = reversed_records.pop(pos)
+        records.remove(removed)
+        _save_grade_records(records)
         return jsonify({'status': 'success'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
