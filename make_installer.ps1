@@ -6,12 +6,14 @@
 #   powershell -ExecutionPolicy Bypass -File .\make_installer.ps1 -SkipPyInstaller   # 只重打安装包（PyInstaller 产物已最新时）
 #   powershell -ExecutionPolicy Bypass -File .\make_installer.ps1 -FastCompile       # 秒级出包（zip/1，产物 ~234MB，仅供本地快速验证）
 #   powershell -ExecutionPolicy Bypass -File .\make_installer.ps1 -QuickAssets       # 只改前端(html/css/js)时：直接拷入产物，跳过 PyInstaller(41s)
+#   powershell -ExecutionPolicy Bypass -File .\make_installer.ps1 -Version 1.0.1     # 指定版本号出包（用户侧会走覆盖升级，无需先卸载）
 #
 # 提速提示：改的只是前端(index.html/css/js)或 Python 代码但没动依赖时，
 #   PyInstaller 增量构建会自动跳过大部分工作；真正的大头是安装包压缩，
 #   日常迭代用默认档即可，正式发布再 -Release。
 param(
     [string]$Python = 'D:\miniconda3\envs\python12\python.exe',
+    [string]$Version = '',
     [switch]$SkipPyInstaller,
     [switch]$QuickAssets,
     [switch]$Release,
@@ -67,8 +69,9 @@ if (-not $iscc) {
 }
 
 $isccArgs = @()
-if ($Release)  { $isccArgs += '/DRelease' }
-if ($FastCompile) { $isccArgs += '/DFastCompile' }
+if ($Version)      { $isccArgs += '/DMyAppVersion=' + $Version }
+if ($Release)      { $isccArgs += '/DRelease' }
+if ($FastCompile)  { $isccArgs += '/DFastCompile' }
 
 Write-Host '==> Inno Setup ...' -ForegroundColor Cyan
 $t = Measure-Command { & $iscc @isccArgs (Join-Path $root 'installer.iss') }

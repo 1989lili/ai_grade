@@ -9,14 +9,18 @@
 ; 为什么能安全地装在每用户目录：运行时可写数据（预设 / 评分标准模板 / 标记位置 / 日志）
 ; 已全部改到 %APPDATA%\AI_Grader，见 backend/paths.py，安装目录本身不需要写权限。
 ;
-; 编译：
+; 编译（版本号可被 ISCC /DMyAppVersion=1.0.1 覆盖，见 make_installer.ps1 -Version）：
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 ;   产物：Output\好帮手AI阅卷安装程序-<版本>.exe
 ;
 ; 前置：先跑 PyInstaller 生成 dist\AI_Grader\ 目录（build.spec，onedir 模式）。
+; 注意：每次对外发布新版请递增版本号（/DMyAppVersion=…），
+;   否则用户在已装同版本的机器上双击会被当成"已是最新"，直接启动而不会覆盖升级。
 
 #define MyAppName      "好帮手AI阅卷"
-#define MyAppVersion   "1.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion   "1.0.0"
+#endif
 #define MyAppExeName   "AI_Grader.exe"
 #define MyAppPublisher "好帮手"
 ; 与 backend/launcher.py 里 CreateMutexW 的互斥体名保持一致（去掉 Local\ 前缀），
