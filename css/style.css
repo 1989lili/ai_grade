@@ -12,6 +12,13 @@
             margin: 0;
         }
 
+        /* 整个 UI 最外层的深蓝色外边框（无边框窗口需要一条明确的边界线）。
+           放在 html 上而不是 .container 上：窗口被拉宽时边框依然贴着窗口边缘。
+           全局 box-sizing: border-box，1px 边框不会撑大布局。 */
+        html {
+            border: 1px solid #1a3a7a;
+        }
+
         .container {
             width: 500px;
             height: 100vh;
@@ -183,7 +190,9 @@
         }
         
         /* 评分标准页面样式 */
+        /* 左右/上边距与 AI配置页白框（.model-params-section）保持一致 */
         .editor-container {
+            margin: -5px 5px 0;
             background-color: #f8f9fa;
             border-radius: 10px;
             border: 1px solid #e0e0e0;
@@ -361,6 +370,71 @@
             box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
         }
         
+        /* 评分标准模板栏（保存 / 快速选择 / 模板库） */
+        .template-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .template-select {
+            flex: 1;
+            min-width: 0;
+            padding: 6px 8px;
+            border: 1px solid #d0d0d0;
+            border-radius: 5px;
+            background-color: #fff;
+            font-size: 12px;
+            color: #333;
+        }
+        .template-btn {
+            padding: 6px 10px;
+            border: 1px solid #d0d0d0;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+            transition: all 0.2s ease;
+        }
+        .template-save-btn {
+            background-color: #43a047;
+            border-color: #43a047;
+            color: #fff;
+        }
+        .template-save-btn:hover {
+            background-color: #2e7d32;
+        }
+        .template-open-btn {
+            background-color: #fff;
+            color: #1976D2;
+            border-color: #1976D2;
+        }
+        .template-open-btn:hover {
+            background-color: #e3f2fd;
+        }
+        .template-item-name {
+            font-weight: bold;
+            color: #1976D2;
+            margin-right: 6px;
+            font-size: 13px;
+        }
+        .template-item-date {
+            color: #999;
+            font-size: 11px;
+        }
+        .template-item-preview {
+            color: #777;
+            font-size: 11px;
+            margin-top: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 300px;
+        }
+        .template-panel .preset-panel-list {
+            max-height: 300px;
+        }
+        
         /* 图片预览样式 */
         .editor-content img {
             max-width: 100%;
@@ -420,14 +494,19 @@
             flex-direction: column;
         }
         
+        /* 左右/上边距与 AI配置页白框（.model-params-section）保持一致 */
         .section {
-            margin-bottom: 4px;
-            width: 100%;
+            margin: 0 5px 4px;
+            width: auto;
             box-sizing: border-box;
             background-color: #ffffff;
             border-radius: 8px;
             padding: 12px;
             border: 1px solid #e0e0e0;
+        }
+
+        .tab-content > .section:first-child {
+            margin-top: -5px;
         }
         
         .section:last-child {
@@ -566,16 +645,17 @@
             border-radius: 5px 0 0 5px;
         }
         
+        /* 与后端 MARKER_COLORS_HEX 保持一致：答题卡=红、打分框=蓝、提交=绿 */
         .marking-item:nth-child(1) .marking-label::before {
-            background-color: #e91e63;
+            background-color: #e53935;
         }
         
         .marking-item:nth-child(2) .marking-label::before {
-            background-color: #2196f3;
+            background-color: #1e88e5;
         }
         
         .marking-item:nth-child(3) .marking-label::before {
-            background-color: #9c27b0;
+            background-color: #43a047;
         }
         
         .marking-btn {
@@ -593,10 +673,8 @@
         }
         
         .marking-btn:hover {
-            background-color: #e3f2fd;
-            color: #000;
+            color: #fff;
             font-weight: bold;
-            font-size: 16px;
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         }
@@ -952,53 +1030,52 @@
         }
         
         .card-area {
-            background-color: #e91e63;
+            background-color: #e53935;
         }
         
         .score-area {
-            background-color: #2196f3;
+            background-color: #1e88e5;
         }
         
         .submit-area {
-            background-color: #9c27b0;
+            background-color: #43a047;
+        }
+
+        /* 悬停保持各自识别色（只提亮），不再统一变成浅蓝 */
+        .card-area:hover {
+            background-color: #ff5252;
+        }
+
+        .score-area:hover {
+            background-color: #448aff;
+        }
+
+        .submit-area:hover {
+            background-color: #66bb6a;
         }
         
+        /* 边距与 AI配置页的白框（.model-params-section: margin -5px 5px 0）对齐 */
         .process-panel {
-            padding: 12px;
+            margin: -5px 5px 0;
+            padding: 0;
             height: 100%;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-        }
-
-        .process-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #e0e7f2;
-        }
-
-        .process-title {
-            font-size: 17px;
-            font-weight: bold;
-            color: #333;
-        }
-
-        .process-elapsed {
-            font-size: 13px;
-            color: #666;
-            background-color: #eef5ff;
-            padding: 4px 8px;
-            border-radius: 12px;
+            gap: 4px;
         }
 
         .status-line {
             font-size: 13px;
             color: #2196f3;
-            padding: 4px 0;
+            padding: 0;
             flex-shrink: 0;
-            min-height: 22px;
+            min-height: 18px;
+            line-height: 18px;
+        }
+
+        /* 空闲时不占位，让输出框紧贴上方标题；批改中再自动出现 */
+        .status-line:empty {
+            display: none;
         }
 
         .stream-output {
@@ -1020,6 +1097,35 @@
         .stream-output:empty::before {
             content: '点击批改后AI评分内容将实时显示在此处';
             color: #aaa;
+        }
+
+        /* 批改结果直接落在“评分过程”流里：题号下面依次是 学生作答 / 阅卷评析 / 成绩得分 */
+        .stream-result {
+            margin: 2px 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed #dde5ee;
+        }
+        .stream-section-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #555;
+            margin-top: 8px;
+        }
+        .stream-section-content {
+            color: #333;
+            line-height: 1.7;
+        }
+        .stream-section-score {
+            font-size: 22px;
+            font-weight: bold;
+            color: #2e7d32;
+        }
+
+        /* 批改失败提示：与结果同一个框内显示 */
+        .stream-error {
+            margin: 8px 0;
+            color: #d32f2f;
+            font-weight: bold;
         }
 
         .process-result {

@@ -125,6 +125,23 @@
                             </div>
                         </div>
                         
+                        <!-- 两段式第一步：先识别出学生作答文字，再交给评分模型打分 -->
+                        <div class="config-item">
+                            <label for="ocr-mode-select">识别方式:</label>
+                            <select id="ocr-mode-select" class="model-select">
+                                <option value="local">内置本地OCR（离线 · 免费 · 默认）</option>
+                                <option value="zhipu">智谱GLM-OCR（云端 · 手写最准）</option>
+                                <option value="vision">识图模型转录（需服务商支持识图）</option>
+                            </select>
+                        </div>
+                        <div class="config-item" id="ocr-zhipu-key-item" style="display: none;">
+                            <label for="ocr-zhipu-key">OCR Key:</label>
+                            <div class="api-key-input">
+                                <input type="password" id="ocr-zhipu-key" placeholder="请输入OCR Key">
+                                <button class="eye-btn">👁️</button>
+                            </div>
+                        </div>
+
                         <div class="preset-buttons">
                             <button class="save-preset-btn">保存预设</button>
                             <button class="preset-list-btn">预设列表</button>
@@ -320,10 +337,29 @@
                             <button class="content-tab" data-tab="example">评价示例</button>
                             <button class="content-tab" data-tab="requirement">评分要求</button>
                         </div>
+                        <div class="template-bar">
+                            <select id="scoring-template-select" class="template-select"
+                                    title="快速选用最近保存的评分模板（默认最近5次）">
+                                <option value="">— 选择模板（最近5次保存）—</option>
+                            </select>
+                            <button type="button" class="template-btn template-save-btn" id="scoring-template-save"
+                                    title="把当前整组评分标准（题目材料/参考答案/评价示例/评分要求）保存为模板">💾 保存</button>
+                            <button type="button" class="template-btn template-open-btn" id="scoring-template-open"
+                                    title="模板库：查看全部、选用或删除模板">📂 模板库</button>
+                        </div>
                         <div class="image-btn-container">
                             <button class="add-image-btn">📷 添加图片</button>
                             <input type="file" id="image-upload" accept="image/*" style="display: none;">
                         </div>
+                    </div>
+                </div>
+                <div class="preset-overlay" id="scoring-template-overlay">
+                    <div class="preset-panel template-panel">
+                        <div class="preset-panel-header">
+                            <span>评分标准模板库</span>
+                            <button class="preset-panel-close" id="scoring-template-panel-close">×</button>
+                        </div>
+                        <div class="preset-panel-list" id="scoring-template-panel-list"></div>
                     </div>
                 </div>
             </div>
@@ -331,15 +367,8 @@
             <!-- 评分过程页面 -->
             <div id="scoring-process-tab" class="tab-content">
                 <div class="process-panel">
-                    <div class="process-header">
-                        <div class="process-title">评分过程</div>
-                        <div id="grading-elapsed" class="process-elapsed">未开始</div>
-                    </div>
                     <div id="grading-status-line" class="status-line"></div>
                     <div id="grading-stream-content" class="stream-output"></div>
-                    <div id="grading-result" class="process-result">
-                        <div class="result-empty-tip">点击"批改"后评分结果将显示在此处</div>
-                    </div>
                 </div>
             </div>
         </div>

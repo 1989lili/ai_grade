@@ -380,6 +380,268 @@ document.addEventListener('DOMContentLoaded', function() {
                 }, 500);
             }, 3000);
         }
+
+        // ---------- 评分标准模板：保存 / 快速选择（最近5次）/ 模板库管理 ----------
+        const templateSelect = document.getElementById('scoring-template-select');
+        const templateSaveBtn = document.getElementById('scoring-template-save');
+        const templateOpenBtn = document.getElementById('scoring-template-open');
+        const templateOverlay = document.getElementById('scoring-template-overlay');
+        const templatePanelClose = document.getElementById('scoring-template-panel-close');
+        const templatePanelList = document.getElementById('scoring-template-panel-list');
+        // 服务端返回顺序：旧 → 新；界面展示倒序（新在前）
+        let scoringTemplates = [];
+
+        function showToast(text) {
+            const msg = document.createElement('div');
+            msg.textContent = text;
+            msg.style.position = 'fixed';
+            msg.style.top = '20px';
+            msg.style.left = '50%';
+            msg.style.transform = 'translateX(-50%)';
+            msg.style.background = 'rgba(0,0,0,0.78)';
+            msg.style.color = '#fff';
+            msg.style.padding = '8px 16px';
+            msg.style.borderRadius = '6px';
+            msg.style.zIndex = '10001';
+            msg.style.fontSize = '13px';
+            document.body.appendChild(msg);
+            setTimeout(function() {
+                msg.style.opacity = '0';
+                msg.style.transition = 'opacity 0.4s ease';
+                setTimeout(function() {
+                    if (msg.parentNode) msg.parentNode.removeChild(msg);
+                }, 400);
+            }, 1600);
+        }
+
+        function collectScoringStandards() {
+            // 先同步当前正在编辑的 tab，保证四个 tab 内容都是最新
+            if (scoringEditor) scoringStandards[currentContentTab] = scoringEditor.innerHTML;
+            return {
+                material: scoringStandards.material,
+                answer: scoringStandards.answer,
+                example: scoringStandards.example,
+                requirement: scoringStandards.requirement
+            };
+        }
+
+        function applyScoringStandards(s) {
+            scoringStandards.material = s.material || '';
+            scoringStandards.answer = s.answer || '';
+            scoringStandards.example = s.example || '';
+            scoringStandards.requirement = s.requirement || '';
+            if (scoringEditor) scoringEditor.innerHTML = scoringStandards[currentContentTab];
+        }
+
+        function stripHtml(html) {
+            const d = document.createElement('div');
+            d.innerHTML = html || '';
+            return (d.textContent || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function fmtTemplateTime(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            const p = function(n) { return (n < 10 ? '0' : '') + n; };
+            return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+        }
+
+        function templateDisplayName(t) {
+            return t.name || ('模板 ' + fmtTemplateTime(t.timestamp));
+        }
+
+        function loadTemplateFromIndex(fileIndex) {
+            const t = scoringTemplates[fileIndex];
+            if (!t) return;
+            applyScoringStandards(t);
+            showToast('已载入模板：' + templateDisplayName(t));
+        }
+
+        function renderTemplateSelect() {
+            if (!templateSelect) return;
+            if (scoringTemplates.length === 0) {
+                templateSelect.innerHTML = '<option value="">暂无已保存的模板</option>';
+                templateSelect.disabled = true;
+                return;
+            }
+            templateSelect.disabled = false;
+            // 默认只列最近5个（新 → 旧）
+            const recent = scoringTemplates.slice(-5).reverse();
+            templateSelect.innerHTML = '<option value="">— 选择模板（最近5次保存）—</option>';
+            recent.forEach(function(t) {
+                const opt = document.createElement('option');
+                opt.value = String(scoringTemplates.indexOf(t));
+                opt.textContent = templateDisplayName(t) + '　' + fmtTemplateTime(t.timestamp);
+                templateSelect.appendChild(opt);
+            });
+            templateSelect.value = '';
+        }
+
+        function renderTemplatePanel() {
+            if (!templatePanelList) return;
+            templatePanelList.innerHTML = '';
+            if (scoringTemplates.length === 0) {
+                templatePanelList.innerHTML = '<div class="preset-panel-empty">暂无已保存的模板。<br>在"评分标准"填好内容后点"💾 保存"即可。</div>';
+                return;
+            }
+            // 新 → 旧 展示，全部可见（弹窗内可滚动）
+            for (let revIndex = 0; revIndex < scoringTemplates.length; revIndex++) {
+                const fileIndex = scoringTemplates.length - 1 - revIndex;
+                const t = scoringTemplates[fileIndex];
+
+                const item = document.createElement('div');
+                item.className = 'preset-panel-item template-panel-item';
+
+                const info = document.createElement('div');
+                info.className = 'preset-panel-item-info';
+
+                const titleLine = document.createElement('div');
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'template-item-name';
+                nameSpan.textContent = templateDisplayName(t);
+                const dateSpan = document.createElement('span');
+                dateSpan.className = 'template-item-date';
+                dateSpan.textContent = fmtTemplateTime(t.timestamp);
+                titleLine.appendChild(nameSpan);
+                titleLine.appendChild(dateSpan);
+
+                const preview = document.createElement('div');
+                preview.className = 'template-item-preview';
+                const mat = stripHtml(t.material);
+                const ans = stripHtml(t.answer);
+                const exa = stripHtml(t.example);
+                const req = stripHtml(t.requirement);
+                const parts = [];
+                if (mat) parts.push('材料:' + mat.slice(0, 16));
+                if (ans) parts.push('答案:' + ans.slice(0, 16));
+                if (exa) parts.push('示例:' + exa.slice(0, 16));
+                if (req) parts.push('要求:' + req.slice(0, 16));
+                preview.textContent = parts.join(' | ') || '（空白内容）';
+
+                info.appendChild(titleLine);
+                info.appendChild(preview);
+                item.appendChild(info);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'preset-panel-item-delete';
+                delBtn.innerHTML = '×';
+                delBtn.title = '删除该模板';
+                delBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (!confirm('确定删除模板「' + templateDisplayName(t) + '」吗？')) return;
+                    fetch('/api/delete-scoring-template', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ index: fileIndex })
+                    }).then(function(r) { return r.json(); })
+                      .then(function(d) {
+                          if (d.status === 'success') {
+                              showToast('模板已删除');
+                              refreshScoringTemplates();
+                          } else {
+                              showToast(d.message || '删除失败');
+                          }
+                      })
+                      .catch(function() { showToast('删除失败，请稍后重试'); });
+                });
+                item.appendChild(delBtn);
+
+                item.addEventListener('click', function() {
+                    loadTemplateFromIndex(fileIndex);
+                    closeTemplatePanel();
+                });
+
+                templatePanelList.appendChild(item);
+            }
+        }
+
+        function refreshScoringTemplates() {
+            return fetch('/api/get-scoring-templates')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    scoringTemplates = (data.status === 'success') ? (data.templates || []) : [];
+                    renderTemplateSelect();
+                    renderTemplatePanel();
+                })
+                .catch(function() {
+                    scoringTemplates = [];
+                    renderTemplateSelect();
+                    renderTemplatePanel();
+                });
+        }
+
+        function openTemplatePanel() {
+            if (!templateOverlay) return;
+            renderTemplatePanel();
+            templateOverlay.classList.add('active');
+        }
+
+        function closeTemplatePanel() {
+            if (templateOverlay) templateOverlay.classList.remove('active');
+        }
+
+        if (templateSaveBtn) {
+            templateSaveBtn.addEventListener('click', function() {
+                const standards = collectScoringStandards();
+                if (!standards.material && !standards.answer && !standards.example && !standards.requirement) {
+                    alert('当前评分标准内容为空，请先填写题目材料/参考答案等内容再保存。');
+                    return;
+                }
+                const now = new Date();
+                const p = function(n) { return (n < 10 ? '0' : '') + n; };
+                const defaultName = '模板 ' + p(now.getMonth() + 1) + '-' + p(now.getDate()) + ' ' + p(now.getHours()) + ':' + p(now.getMinutes());
+                const input = prompt('给模板起个简短名称（留空则按保存时间自动命名）：', defaultName);
+                if (input === null) return; // 用户取消
+                const name = input.trim();
+
+                fetch('/api/save-scoring-template', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        material: standards.material,
+                        answer: standards.answer,
+                        example: standards.example,
+                        requirement: standards.requirement
+                    })
+                }).then(function(r) { return r.json(); })
+                  .then(function(d) {
+                      if (d.status === 'success') {
+                          showToast('已保存模板：' + (d.template && d.template.name ? d.template.name : name || '未命名'));
+                          refreshScoringTemplates();
+                      } else {
+                          alert('保存失败：' + (d.message || '未知错误'));
+                      }
+                  })
+                  .catch(function() { alert('保存失败，请稍后重试'); });
+            });
+        }
+
+        if (templateSelect) {
+            templateSelect.addEventListener('change', function() {
+                const fileIndex = parseInt(templateSelect.value, 10);
+                templateSelect.value = '';
+                if (!isNaN(fileIndex) && scoringTemplates[fileIndex]) {
+                    loadTemplateFromIndex(fileIndex);
+                }
+            });
+        }
+
+        if (templateOpenBtn) {
+            templateOpenBtn.addEventListener('click', openTemplatePanel);
+        }
+        if (templatePanelClose) {
+            templatePanelClose.addEventListener('click', closeTemplatePanel);
+        }
+        if (templateOverlay) {
+            templateOverlay.addEventListener('click', function(e) {
+                if (e.target === templateOverlay) closeTemplatePanel();
+            });
+        }
+
+        // 进入页面时自动加载已保存的模板列表
+        refreshScoringTemplates();
     }
 
     tabs.forEach((tab, index) => {
@@ -725,11 +987,7 @@ document.addEventListener('DOMContentLoaded', function() {
         stopElapsedTimer();
         setElapsedText('未开始');
         setStatusLine('');
-        var resultBox = document.getElementById('grading-result');
-        if (resultBox) {
-            resultBox.classList.remove('active');
-            resultBox.innerHTML = '<div class="result-empty-tip">点击"批改"后评分结果将显示在此处</div>';
-        }
+        // 评分过程与结果已合并为同一个框，这里只需清空它
         var streamBox = document.getElementById('grading-stream-content');
         if (streamBox) {
             streamBox.textContent = '';
@@ -752,93 +1010,58 @@ document.addEventListener('DOMContentLoaded', function() {
     function appendStreamContent(text) {
         var box = document.getElementById('grading-stream-content');
         if (!box) return;
-        box.textContent += text;
+        // 用文本节点追加：textContent += 会把已插入的 HTML 段落压成纯文本，丢掉样式
+        box.appendChild(document.createTextNode(text));
         box.scrollTop = box.scrollHeight;
     }
 
+    // 批改失败也写进同一个“评分过程”框（结果框已合并、删除）
     function showGradingResult(result) {
-        var resultBox = document.getElementById('grading-result');
-        if (!resultBox) return;
-        resultBox.textContent = '';
-        resultBox.classList.add('active');
-
-        function escapeHtml(s) {
-            return String(s == null ? '' : s)
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-        }
-
-        if (result.status === 'success') {
-            var ocrLabel = result.ocr_label || '视觉直评';
-            var providerLabel = result.provider_label || '';
-
-            if (result.student_answer) {
-                var saTitle = document.createElement('div');
-                saTitle.className = 'result-section-title';
-                saTitle.innerHTML = '【学生作答】<span class="result-section-meta">· ' + escapeHtml(ocrLabel) + '</span>';
-                resultBox.appendChild(saTitle);
-                var saContent = document.createElement('div');
-                saContent.className = 'result-section-content';
-                saContent.textContent = result.student_answer;
-                resultBox.appendChild(saContent);
-            }
-
-            if (result.review_analysis) {
-                var raTitle = document.createElement('div');
-                raTitle.className = 'result-section-title';
-                if (providerLabel) {
-                    raTitle.innerHTML = '【阅卷评析】<span class="result-section-meta">· ' + escapeHtml(providerLabel) + '</span>';
-                } else {
-                    raTitle.textContent = '【阅卷评析】';
-                }
-                resultBox.appendChild(raTitle);
-                var raContent = document.createElement('div');
-                raContent.className = 'result-section-content';
-                raContent.textContent = result.review_analysis;
-                resultBox.appendChild(raContent);
-            }
-
-            var sTitle = document.createElement('div');
-            sTitle.className = 'result-section-title';
-            sTitle.textContent = '【成绩得分】';
-            resultBox.appendChild(sTitle);
-            var scoreLine = document.createElement('div');
-            scoreLine.className = 'result-score-line';
-            scoreLine.innerHTML = '<span class="result-score-big">' + result.score + '</span>' +
-                                  '<span class="result-score-divider"> / </span>' +
-                                  '<span class="result-score-max">' + result.max_score + '</span>';
-            resultBox.appendChild(scoreLine);
-
-            // 时延小字（埋点：截图压缩 / OCR / 首响 / 评分 / 总）
-            if (result.timings) {
-                var t = result.timings;
-                var fmt = function(ms) { return (ms == null) ? '—' : (ms / 1000).toFixed(2) + 's'; };
-                var parts = [];
-                if (t.capture_ms != null) parts.push('截图 ' + fmt(t.capture_ms));
-                if (t.ocr_ms != null) parts.push('OCR ' + fmt(t.ocr_ms));
-                if (t.model_first_byte_ms != null) parts.push('首响 ' + fmt(t.model_first_byte_ms));
-                if (t.model_ms != null) parts.push('评分 ' + fmt(t.model_ms));
-                if (t.total_ms != null) parts.push('总计 ' + fmt(t.total_ms));
-                if (parts.length > 0) {
-                    var timingLine = document.createElement('div');
-                    timingLine.className = 'result-timing-line';
-                    timingLine.textContent = parts.join(' · ');
-                    resultBox.appendChild(timingLine);
-                }
-            }
-        } else {
-            var errScore = document.createElement('div');
-            errScore.className = 'result-score-line';
-            errScore.innerHTML = '<span style="color:#d32f2f;font-size:20px;">批改失败</span>';
-            resultBox.appendChild(errScore);
-
-            var errMsg = document.createElement('div');
-            errMsg.className = 'result-section-content';
-            errMsg.textContent = result.message || '批改失败';
-            errMsg.style.color = '#d32f2f';
-            resultBox.appendChild(errMsg);
-        }
+        if (!result || result.status === 'success') return;
+        var box = document.getElementById('grading-stream-content');
+        if (!box) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'stream-error';
+        wrap.textContent = '【批改失败】' + (result.message || '批改失败');
+        box.appendChild(wrap);
+        box.scrollTop = box.scrollHeight;
     }
+
+    // ── 两段式第一步：识别方式（AI配置页“识别方式”下拉） ──
+    function getOcrSettings() {
+        var sel = document.getElementById('ocr-mode-select');
+        var mode = (sel && sel.value) || 'local';
+        var settings = { ocrMode: mode, ocrApiKey: '' };
+        if (mode === 'zhipu') {
+            var keyEl = document.getElementById('ocr-zhipu-key');
+            var zhipuKey = keyEl ? keyEl.value.trim() : '';
+            if (!zhipuKey) {
+                // 评分模型本身就选了智谱时，可直接复用智谱服务商的 Key
+                var providerKey = document.getElementById('api-key-zhipu');
+                zhipuKey = providerKey ? providerKey.value.trim() : '';
+            }
+            settings.ocrApiKey = zhipuKey;
+        }
+        return settings;
+    }
+
+    (function setupOcrModeSelect() {
+        var sel = document.getElementById('ocr-mode-select');
+        var keyItem = document.getElementById('ocr-zhipu-key-item');
+        if (!sel) return;
+        try {
+            var saved = localStorage.getItem('ocr_mode');
+            if (saved && Array.prototype.some.call(sel.options, function(o) { return o.value === saved; })) {
+                sel.value = saved;
+            }
+        } catch (e) { /* localStorage 不可用时忽略 */ }
+        function sync() {
+            if (keyItem) keyItem.style.display = sel.value === 'zhipu' ? '' : 'none';
+            try { localStorage.setItem('ocr_mode', sel.value); } catch (e) {}
+        }
+        sel.addEventListener('change', sync);
+        sync();
+    })();
 
     async function startGrading() {
         var debugInput = document.querySelector('.debug-info input');
@@ -847,6 +1070,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         var api = (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
         if (!api) { alert('API 未就绪，请稍候再试'); return; }
+
+        // 恢复标记：逐个 await，后端 hide/show 已改为同步等待 tk 线程真正执行完，
+        // 返回时标记窗口必然已重新显示，下一轮读取坐标才不会误判“标记丢失”
+        async function restoreMarkers(cardArea, scoreBox, submitBtn) {
+            await api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
+            await api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
+            await api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
+        }
 
         // 检查标记
         var rects = await api.get_all_marker_rects();
@@ -895,9 +1126,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 break;
             }
 
+            // 用户点击【停止】→ 阅完当前这一张后在这里停下来，不再开始下一张
+            if (gradingStopRequested) {
+                gradingStopRequested = false;
+                debugInput.value = '已停止，本次共阅 ' + completed + ' 份';
+                appendStreamContent('【已停止】完成 ' + completed + ' / ' + total + ' 份\n');
+                updateProgress();
+                break;
+            }
+
             // 刷新标记位置（用户可能调整过）
             rects = await api.get_all_marker_rects();
             if (!rects || !rects.card || !rects.score || !rects.submit) {
+                // 提示打印到“评分过程”面板（而不是只显示在进度条上）
+                activateMainTab('scoring-process-tab');
+                showGradingResult({ status: 'error', message: '标记丢失，已停止批改。请重新框定答题卡区域、打分框、提交按钮三个标记后再试。' });
                 debugInput.value = '标记丢失，停止批改';
                 break;
             }
@@ -928,8 +1171,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 // ── 调AI评分（流式） ──
                 var analyzeResult = null;
                 var reasoningStarted = false;
-                var partialScoreShown = false;
                 var analyzeTimings = {};
+                var ocrSettings = getOcrSettings();
                 var analyzeResponse = await fetch('/api/grade/analyze-stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -938,7 +1181,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         standards: scoringStandards,
                         provider: config.provider,
                         apiKey: config.apiKey,
-                        modelName: config.modelName
+                        modelName: config.modelName,
+                        ocrMode: ocrSettings.ocrMode,
+                        ocrApiKey: ocrSettings.ocrApiKey
                     })
                 });
 
@@ -955,13 +1200,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                     if (event.type === 'token') {
-                        appendStreamContent(event.content || '');
-                        return;
-                    }
-                    if (event.type === 'partial_score') {
-                        if (!partialScoreShown) {
-                            appendStreamContent('\n[初步得分] ' + event.score + ' / ' + event.max_score + '\n');
-                            partialScoreShown = true;
+                        // 模型现在按“纯文本标签行”分段输出，token 逐字上屏实现流式；
+                        // 保险起见把代码块围栏 ``` ```json 剥掉
+                        if (!reasoningStarted) {
+                            setStatusLine('正在生成阅卷评析...');
+                            reasoningStarted = true;
+                        }
+                        var chunk = String(event.content || '')
+                            .replace(/```(?:json)?/gi, '')
+                            .replace(/```/g, '');
+                        if (chunk) {
+                            appendStreamContent(chunk);
                         }
                         return;
                     }
@@ -971,12 +1220,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         return;
                     }
                     if (event.type === 'ocr_text_chunk') {
-                        // 识别文本逐行实时上屏（打字机效果）
-                        if (!analyzeTimings.__ocr_typewriter) {
-                            analyzeTimings.__ocr_typewriter = true;
-                            appendStreamContent('\n【识别文本】\n');
-                        }
-                        if (event.line) appendStreamContent(event.line + '\n');
+                        // 识别文字统一在 final 后以【学生作答】整段呈现，这里不再逐行刷屏
+                        setStatusLine('正在识别学生作答...');
                         return;
                     }
                     if (event.type === 'timing') {
@@ -1027,7 +1272,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 if (api.hide_scan_line) api.hide_scan_line();
-                appendStreamContent('\n--- 评分完成，正在填写提交 ---\n');
+                // 模型文本已实时上屏（流式），这里补一行收尾提示
+                appendStreamContent('\n');
 
                 // ── 填写分数并提交 ──
                 var applyResponse = await fetch('/api/grade/apply', {
@@ -1055,17 +1301,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 completed = completed + 1;
                 completedInput.value = completed;
                 updateProgress();
-                appendStreamContent('得分: ' + analyzeResult.score + '/' + analyzeResult.max_score + '\n');
 
-                // 恢复标记
+                // 恢复标记（同步等 tk 线程真正显示完成，避免下一轮误判标记丢失）
                 if (markersHidden && api && api.show_marker_at) {
-                    api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
-                    api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
-                    api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
+                    await restoreMarkers(cardArea, scoreBox, submitBtn);
                     markersHidden = false;
                 }
 
-                showGradingResult(analyzeResult);
                 debugInput.value = '第 ' + completed + '/' + total + ' 份完成，得分: ' + analyzeResult.score;
 
                 if (completed >= total) {
@@ -1079,13 +1321,10 @@ document.addEventListener('DOMContentLoaded', function() {
             } catch (error) {
                 stopElapsedTimer();
                 if (api.hide_scan_line) api.hide_scan_line();
-                // 恢复标记
+                // 恢复标记（同步等 tk 线程真正显示完成）
                 if (markersHidden && api && api.show_marker_at) {
-                    api.show_marker_at('card', cardArea.x, cardArea.y, cardArea.w, cardArea.h);
-                    api.show_marker_at('score', scoreBox.x, scoreBox.y, scoreBox.w, scoreBox.h);
-                    api.show_marker_at('submit', submitBtn.x, submitBtn.y, submitBtn.w, submitBtn.h);
+                    await restoreMarkers(cardArea, scoreBox, submitBtn);
                 }
-                appendStreamContent('\n[错误] ' + error.message + '\n');
                 showGradingResult({ status: 'error', message: error.message });
                 debugInput.value = '批改出错: ' + error.message;
                 break;
@@ -1097,23 +1336,45 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var correctBtn = document.getElementById('correct-btn');
     var gradingActive = false;
+    var gradingBusy = false;            // 同步防重入：避免双击连开两个批改循环
+    var gradingStopRequested = false;   // 点击【停止】置真；阅完当前这一张后停止
+
+    // 点击【停止】：只置标记，已发出的模型请求继续响应；批改循环阅完当前这一张
+    // （含打分与提交）后，在开始下一张前发现标记即结束，按钮恢复【批改】。
+    async function stopGrading() {
+        if (gradingStopRequested) return;
+        gradingStopRequested = true;
+        if (correctBtn) {
+            correctBtn.textContent = '停止中…';
+            correctBtn.disabled = true;
+        }
+        appendStreamContent('【收到停止指令：阅完当前这一张后停止】\n');
+    }
 
     function setGradingButtons(grading) {
         gradingActive = grading;
         if (correctBtn) {
-            correctBtn.disabled = grading;
+            // 批改中按钮保持可点（文本为【停止】），用于中途暂停
+            correctBtn.disabled = !grading;
+            correctBtn.textContent = grading ? '停止' : '批改';
         }
     }
 
     if (correctBtn) {
-        correctBtn.addEventListener('click', function() {
-            if (correctBtn.disabled) return;
-            // 防抖：3秒内不能重复点击
-            correctBtn.disabled = true;
-            setTimeout(function() {
-                if (!gradingActive) correctBtn.disabled = false;
-            }, 3000);
-            startGrading();
+        correctBtn.addEventListener('click', async function() {
+            if (correctBtn.disabled || gradingBusy) return;
+            if (gradingActive) {
+                await stopGrading();       // 批改中：请求【停止】
+                return;
+            }
+            gradingBusy = true;            // 同步占位，防双击重复启动
+            setGradingButtons(true);       // 按钮立即变【停止】
+            try {
+                await startGrading();
+            } finally {
+                gradingBusy = false;
+                setGradingButtons(false);  // 恢复【批改】
+            }
         });
     }
 
@@ -1130,9 +1391,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 this.textContent = '删除标记';
                 var mi = this.closest('.marking-item');
                 var ml = mi.querySelector('.marking-label');
-                if (this.classList.contains('card-area')) { ml.style.backgroundColor = 'rgba(233, 30, 99, 0.2)'; }
-                else if (this.classList.contains('score-area')) { ml.style.backgroundColor = 'rgba(33, 150, 243, 0.2)'; }
-                else if (this.classList.contains('submit-area')) { ml.style.backgroundColor = 'rgba(156, 39, 176, 0.2)'; }
+                if (this.classList.contains('card-area')) { ml.style.backgroundColor = 'rgba(229, 57, 53, 0.18)'; }
+                else if (this.classList.contains('score-area')) { ml.style.backgroundColor = 'rgba(30, 136, 229, 0.18)'; }
+                else if (this.classList.contains('submit-area')) { ml.style.backgroundColor = 'rgba(67, 160, 71, 0.18)'; }
                 ml.style.color = '';
                 ml.style.fontWeight = 'bold';
                 ml.style.fontSize = '16px';
