@@ -314,6 +314,13 @@ def build_grading_messages(image_base64, standards, streaming=False, image_mime_
     if use_text_path:
         text_parts.append("请对下面的学生作答进行评分。")
         text_parts.append(f"【学生作答（OCR识别）】\n{ocr_text.strip()}")
+        # 抽取作答中实际出现的题号，硬约束模型只评这些题，防止臆造不存在的题号
+        qn = _detect_question_numbers(ocr_text)
+        if qn:
+            text_parts.append(
+                f"注意：本卷学生作答只包含题号 {qn}。只能针对这些题评分；"
+                "若参考答案里还有其它题号（如作答没有的题），一律不得评价、不得扣分、不得出现在阅卷评析里。"
+            )
     else:
         text_parts.append("请对下面的答题卡截图进行评分。")
 
@@ -1026,6 +1033,24 @@ def _clean_ocr_lines(text):
         return ''
     kept = [ln for ln in text.split('\n') if ln.strip() and not _OCR_SCORE_LINE_RE.match(ln.strip())]
     return '\n'.join(kept).strip()
+
+
+def _detect_question_numbers(ocr_text):
+    """从学生作答文本里找出实际出现的大题号（行首数字 + 点号），用于约束评分范围。
+
+    例如行首为 “17. ①…”“18. ①…” → 返回 '17、18'；
+    避免模型拿着参考答案里的 19/20 题去臆造评分。
+    """
+    if not ocr_text:
+        return ''
+    nums = []
+    seen = set()
+    for m in re.finditer(r'(?m)^\s*(\d{1,3})\s*[.．、:：]', ocr_text):
+        n = int(m.group(1))
+        if 1 <= n <= 200 and n not in seen:
+            seen.add(n)
+            nums.append(n)
+    return '、'.join(str(n) for n in sorted(nums)) if nums else ''
 
 
 def stream_analyze_card_grading(data):
