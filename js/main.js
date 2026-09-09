@@ -1407,8 +1407,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (gradingStopRequested) return;
         gradingStopRequested = true;
         if (correctBtn) {
+            // 提示“停止中”，但不置灰（批改结束后会恢复成【批改】）
             correctBtn.textContent = '停止中…';
-            correctBtn.disabled = true;
+            correctBtn.disabled = false;
         }
         appendStreamContent('【收到停止指令：阅完当前这一张后停止】\n');
     }
@@ -1416,8 +1417,9 @@ document.addEventListener('DOMContentLoaded', function() {
     function setGradingButtons(grading) {
         gradingActive = grading;
         if (correctBtn) {
-            // 批改中按钮保持可点（文本为【停止】），用于中途暂停
-            correctBtn.disabled = !grading;
+            // 【批改】按钮永远可点、永不置灰：
+            //   空闲时文本“批改”，批改中文本“停止”，结束后自动回到“批改”。
+            correctBtn.disabled = false;
             correctBtn.textContent = grading ? '停止' : '批改';
         }
     }
