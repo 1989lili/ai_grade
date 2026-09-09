@@ -8,6 +8,7 @@ import threading
 import time
 import logging
 import queue
+import json
 import webview
 
 # 最先执行完整性校验
@@ -23,11 +24,57 @@ logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 # ---------- 标记常量 ----------
 
+# 三色尽量拉开视觉差异（红/蓝/绿），避免粉与紫难分辨
 MARKER_COLORS_HEX = {
-    'card':   '#e91e63',
-    'score':  '#2196f3',
-    'submit': '#9c27b0',
+    'card':   '#e53935',
+    'score':  '#1e88e5',
+    'submit': '#43a047',
 }
+
+# 上次标记框位置/大小的持久化文件（统一放 %APPDATA%\AI_Grader，与预设同目录）
+try:
+    from paths import data_file as _data_file
+except Exception:
+    _data_file = None
+
+if _data_file is not None:
+    MARKER_STATE_FILE = _data_file('marker_state.json')
+else:
+    # 兜底：paths 模块不可用时退回 exe 同级目录
+    if getattr(sys, 'frozen', False):
+        _DATA_DIR = os.path.dirname(sys.executable)
+    else:
+        _DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+    MARKER_STATE_FILE = os.path.join(_DATA_DIR, 'marker_state.json')
+
+
+def _load_marker_state():
+    """读取上次保存的标记框位置；文件缺失/损坏时返回空 dict。"""
+    try:
+        with open(MARKER_STATE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_marker_rect(mtype, rect):
+    """记住某个标记框最新的位置与大小（原子写入，失败不影响批改）。"""
+    try:
+        data = _load_marker_state()
+        data[mtype] = {
+            'x': int(rect['x']), 'y': int(rect['y']),
+            'w': int(rect['w']), 'h': int(rect['h']),
+        }
+        tmp = MARKER_STATE_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, MARKER_STATE_FILE)
+    except Exception:
+        try:
+            log.warning('保存标记框位置失败: %s', mtype, exc_info=True)
+        except Exception:
+            pass
 
 MARKER_TRANSPARENT_COLOR = '#010203'
 
@@ -45,9 +92,31 @@ MARKER_SIZES = {
 
 MARKER_ORDER = ('card', 'score', 'submit')
 
+
+def _shade_color(hex_color, ratio):
+    """颜色微调：ratio<0 向黑过渡，ratio>0 向白过渡，用于扫描线渐变取色。"""
+    h = hex_color.lstrip('#')
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    if ratio >= 0:
+        r = int(r + (255 - r) * ratio)
+        g = int(g + (255 - g) * ratio)
+        b = int(b + (255 - b) * ratio)
+    else:
+        f = 1.0 + ratio
+        r, g, b = int(r * f), int(g * f), int(b * f)
+    return '#%02x%02x%02x' % (min(r, 255), min(g, 255), min(b, 255))
+
+
+def _scan_band_palette(base):
+    """由标记颜色生成对称的渐变光带（深→基色→近白→基色→深），保证与标记线/标记按钮同色系。"""
+    stops = (-0.65, -0.40, -0.15, 0.30, 0.88, 0.30, -0.15, -0.40, -0.65)
+    heights = (1, 2, 3, 4, 5, 4, 3, 2, 1)
+    return [(_shade_color(base, s), h) for s, h in zip(stops, heights)]
+
 # ---------- 标记线程通信 ----------
 
 _marker_queue = queue.Queue()  # 主线程 → tkinter 线程
+log = logging.getLogger('ai_grade')  # 与 app.py 同一日志通道
 
 
 class TkMarker:
@@ -107,7 +176,7 @@ class TkMarker:
                 cursor='fleur'
             )
             canvas.pack(fill='both', expand=True)
-            line_id = canvas.create_line(0, 0, 1, 1, fill=self._color, width=3, dash=(10, 6))
+            line_id = canvas.create_line(0, 0, 1, 1, fill=self._color, width=5)
             win.withdraw()
 
             self._wins[part] = win
@@ -207,6 +276,8 @@ class TkMarker:
 
     def _on_release(self, event):
         self._drag_start = None
+        # 用户拖动/缩放结束后记住位置与大小，下次启动直接复用
+        _save_marker_rect(self._mtype, self._rect)
 
     def _layout(self):
         x, y, w, h = self._rect['x'], self._rect['y'], self._rect['w'], self._rect['h']
@@ -263,26 +334,17 @@ class TkScanLine:
     """答题卡区域扫描线动画。支持单次扫描和循环扫描两种模式。
 
     增强：
-    - 渐变光带：9 层窗口叠加（深青→亮青→白→亮青→深青）模拟渐变扫描线
+    - 渐变光带：9 层窗口叠加（深→标记色→近白→标记色→深）模拟渐变扫描线
+    - 同色系：取色跟随答题卡区域标记颜色，与标记线、标记按钮保持一致
     - 正弦缓动：起止减速，消除匀速机械感
     - 完成反馈：单次扫描结束时区域边框高亮闪烁一次（与截图动作联动）
     - 速度自适应：大区域自动提高每帧移动量，视觉速度均匀
     """
 
-    # 光带分层：(颜色, 高度px)，中心亮白两侧渐深，总高 25px
-    _BAND = [
-        ('#004d66', 1),
-        ('#008899', 2),
-        ('#00c2d6', 3),
-        ('#00e6f2', 4),
-        ('#e6ffff', 5),
-        ('#00f2fe', 4),
-        ('#00c2d6', 3),
-        ('#008899', 2),
-        ('#004d66', 1),
-    ]
+    # 光带分层：(颜色, 高度px)，中心近白两侧渐深，总高 25px；颜色来自答题卡标记色
+    _BAND = _scan_band_palette(MARKER_COLORS_HEX['card'])
     _BAND_H = sum(h for _, h in _BAND)
-    _FRAME_COLOR = '#00f2fe'
+    _FRAME_COLOR = MARKER_COLORS_HEX['card']
     _FRAME_BORDER = 3
 
     def __init__(self, root):
@@ -479,6 +541,19 @@ def _tk_marker_main(markers_out, ready_event):
         markers_out[mt] = TkMarker(root, mt)
     markers_out['_scan_line'] = TkScanLine(root)
 
+    # 复用上次退出时的标记框位置与大小，打开软件即可直接批改
+    saved_rects = _load_marker_state()
+    for mt in MARKER_ORDER:
+        rect = saved_rects.get(mt)
+        m = markers_out.get(mt)
+        if not m or not isinstance(rect, dict):
+            continue
+        try:
+            m._show(rect['x'], rect['y'], rect['w'], rect['h'])
+            log.info('恢复标记框 %s: x=%s y=%s w=%s h=%s', mt, rect.get('x'), rect.get('y'), rect.get('w'), rect.get('h'))
+        except Exception:
+            log.warning('恢复标记框失败: %s %s', mt, rect, exc_info=True)
+
     ready_event.set()
 
     def poll_queue():
@@ -486,44 +561,53 @@ def _tk_marker_main(markers_out, ready_event):
             while True:
                 cmd = _marker_queue.get_nowait()
                 action = cmd[0]
-                if action == 'show':
-                    _, mtype, x, y, w, h = cmd
-                    m = markers_out.get(mtype)
-                    if m:
-                        m._show(x, y, w, h)
-                elif action == 'hide':
-                    m = markers_out.get(cmd[1])
-                    if m:
-                        m._hide()
-                elif action == 'scan_card':
-                    _, x, y, w, h, duration_ms = cmd
-                    scan_line = markers_out.get('_scan_line')
-                    if scan_line:
-                        scan_line.start(x, y, w, h, duration_ms)
-                elif action == 'scan_card_loop':
-                    _, x, y, w, h, duration_ms = cmd
-                    scan_line = markers_out.get('_scan_line')
-                    if scan_line:
-                        scan_line.start_loop(x, y, w, h, duration_ms)
-                elif action == 'scan_flash':
-                    _, times = cmd
-                    scan_line = markers_out.get('_scan_line')
-                    if scan_line:
-                        scan_line._flash_frame(times)
-                elif action == 'hide_scan':
-                    scan_line = markers_out.get('_scan_line')
-                    if scan_line:
-                        scan_line.hide()
-                elif action == 'destroy':
-                    for m in list(markers_out.values()):
-                        m._destroy()
-                    markers_out.clear()
-                elif action == 'quit':
-                    for m in list(markers_out.values()):
-                        m._destroy()
-                    markers_out.clear()
-                    root.quit()
-                    return
+                try:
+                    if action == 'show':
+                        _, mtype, x, y, w, h = cmd[:6]
+                        m = markers_out.get(mtype)
+                        if m:
+                            m._show(x, y, w, h)
+                    elif action == 'hide':
+                        m = markers_out.get(cmd[1])
+                        if m:
+                            m._hide()
+                    elif action == 'scan_card':
+                        _, x, y, w, h, duration_ms = cmd
+                        scan_line = markers_out.get('_scan_line')
+                        if scan_line:
+                            scan_line.start(x, y, w, h, duration_ms)
+                    elif action == 'scan_card_loop':
+                        _, x, y, w, h, duration_ms = cmd
+                        scan_line = markers_out.get('_scan_line')
+                        if scan_line:
+                            scan_line.start_loop(x, y, w, h, duration_ms)
+                    elif action == 'scan_flash':
+                        _, times = cmd
+                        scan_line = markers_out.get('_scan_line')
+                        if scan_line:
+                            scan_line._flash_frame(times)
+                    elif action == 'hide_scan':
+                        scan_line = markers_out.get('_scan_line')
+                        if scan_line:
+                            scan_line.hide()
+                    elif action == 'destroy':
+                        for m in list(markers_out.values()):
+                            m._destroy()
+                        markers_out.clear()
+                    elif action == 'quit':
+                        for m in list(markers_out.values()):
+                            m._destroy()
+                        markers_out.clear()
+                        root.quit()
+                        return
+                except Exception:
+                    # 单条命令异常不能拖垮整个标记线程（否则标记会永久失去响应）
+                    log.exception('标记线程处理命令异常: action=%s cmd=%s', action, cmd[:2])
+                finally:
+                    # 同步命令（show/hide）携带 threading.Event，执行完必须唤醒调用方，
+                    # 保证 JS 侧在标记真正显示/隐藏完成前不会继续截图或读取坐标
+                    if len(cmd) >= 2 and isinstance(cmd[-1], threading.Event):
+                        cmd[-1].set()
         except queue.Empty:
             pass
         root.after(50, poll_queue)
@@ -598,11 +682,87 @@ def get_screen_size():
         return 1920, 1080
 
 
+def get_work_area_dip():
+    """工作区（去掉任务栏），换算成 DIP/逻辑像素，与 pywebview 使用的单位一致。
+
+    pyautogui.size() 返回的是物理像素，而 pywebview 的 width/height/x/y 按 DIP 处理；
+    在 125%/150%/200% 缩放下直接用物理像素会把窗口算得比屏幕还高，导致只露出半截。
+    返回 (left, top, width, height)，取不到时返回 None。
+    """
+    user32 = ctypes.windll.user32
+    try:
+        work = wintypes.RECT()
+        if not user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work), 0):  # SPI_GETWORKAREA
+            return None
+        scale = 1.0
+        try:
+            gdi32 = ctypes.windll.gdi32
+            dc = user32.GetDC(0)
+            try:
+                dpi_x = gdi32.GetDeviceCaps(dc, 88)  # LOGPIXELSX
+                if dpi_x:
+                    scale = dpi_x / 96.0
+            finally:
+                user32.ReleaseDC(0, dc)
+        except Exception:
+            pass
+        width = (work.right - work.left) / scale
+        height = (work.bottom - work.top) / scale
+        if width <= 0 or height <= 0:
+            return None
+        return (work.left / scale, work.top / scale, width, height)
+    except Exception:
+        log.warning('读取工作区失败，改用 pyautogui 屏幕尺寸', exc_info=True)
+        return None
+
+
 def calc_window_size():
-    sw, sh = get_screen_size()
-    w = 500
-    h = max(809, min(945, int(sh * 0.9009)))
+    """按真实工作区（DIP）计算窗口尺寸：小屏/高缩放机器也不会超出屏幕。"""
+    area = get_work_area_dip()
+    if area:
+        avail_w, avail_h = area[2], area[3]
+    else:
+        avail_w, avail_h = get_screen_size()
+    w = min(500, max(360, int(avail_w * 0.9)))
+    # 占工作区 94% 高，上限 945；不再设 809 的硬下限（那正是小屏显示不全的原因）
+    h = min(945, max(480, int(avail_h * 0.94)))
+    h = min(h, int(avail_h))
     return w, h
+
+
+def fit_window_into_work_area(hwnd, top_margin_ratio=0.02):
+    """把窗口收进真实工作区并上移，解决高 DPI 缩放下的“窗口超出屏幕、只露出 60%”问题。
+
+    calc_window_size() 用的是 pyautogui 的物理像素，而 pywebview 按 DIP 定位窗口；
+    125%/150% 缩放下两者不一致，窗口会比屏幕还高。这里统一用 Win32 实测坐标纠正：
+    GetWindowRect 与 SPI_GETWORKAREA 处于同一坐标系，因此不受缩放比例影响。
+    """
+    user32 = ctypes.windll.user32
+    try:
+        work = wintypes.RECT()
+        if not user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(work), 0):  # SPI_GETWORKAREA
+            return
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return
+        win_w = rect.right - rect.left
+        win_h = rect.bottom - rect.top
+        avail_w = work.right - work.left
+        avail_h = work.bottom - work.top
+        if win_w <= 0 or win_h <= 0 or avail_w <= 0 or avail_h <= 0:
+            return
+
+        new_w = min(win_w, avail_w)
+        new_h = min(win_h, avail_h)
+        x = work.left + max(0, (avail_w - new_w) // 2)
+        y = work.top + max(0, int(avail_h * top_margin_ratio))   # 贴顶留 2% 边距，整体抬高
+        y = max(work.top, min(y, work.bottom - new_h))           # 保证底部不被任务栏切掉
+        # SWP_NOZORDER(0x4) 保留置顶状态，SWP_NOACTIVATE(0x10) 不抢焦点
+        user32.SetWindowPos(hwnd, 0, x, y, new_w, new_h, 0x0004 | 0x0010)
+        log.info('窗口校正: %dx%d -> %dx%d @(%d,%d) 工作区=%dx%d',
+                 win_w, win_h, new_w, new_h, x, y, avail_w, avail_h)
+    except Exception:
+        log.warning('窗口位置校正失败', exc_info=True)
 
 
 # ---------- WindowApi（暴露给 JS） ----------
@@ -639,11 +799,38 @@ class WindowApi:
 
     # ---- 标记控制 ----
 
+    @staticmethod
+    def _queue_sync(cmd, timeout=2.0):
+        """把命令投递给 tkinter 线程，并等待它真正执行完成。
+
+        原来 show/hide 只是把命令丢进队列就返回，JS 侧紧接着读取标记坐标时
+        tkinter 线程往往还没把窗口显示出来（轮询间隔 50ms），导致连续自动批改
+        第二份时把“尚未恢复显示”误判为“标记丢失”而停止。这里通过 Event 等待
+        tkinter 线程执行完毕，保证调用返回时标记窗口状态已生效。
+        """
+        done = threading.Event()
+        _marker_queue.put(tuple(cmd) + (done,))
+        if not done.wait(timeout):
+            log.warning('标记线程命令执行超时: %s', cmd[:2])
+
     def show_marker(self, mtype):
-        """通过队列通知 tkinter 线程显示标记。位置计算在主线程完成。"""
+        """通过队列通知 tkinter 线程显示标记（等待真正显示完成）。位置计算在主线程完成。"""
         m = self._markers.get(mtype)
         if not m:
             return
+
+        # 已经显示过（含启动时复用的上次位置）就不再挪动，避免用户重新点按钮时标记跳走
+        if m.is_visible():
+            return
+
+        saved = _load_marker_state().get(mtype)
+        if isinstance(saved, dict):
+            try:
+                self._queue_sync(('show', mtype, int(saved['x']), int(saved['y']),
+                                  int(saved['w']), int(saved['h'])))
+                return
+            except Exception:
+                log.warning('应用上次标记位置失败，改用默认位置: %s', mtype, exc_info=True)
 
         try:
             mhwnd = int(self._window.native.Handle.ToInt64())
@@ -682,17 +869,17 @@ class WindowApi:
                 break
             y += MARKER_SIZES[mt][1] + gap
 
-        _marker_queue.put(('show', mtype, x, y, sw, sh))
+        self._queue_sync(('show', mtype, x, y, sw, sh))
 
     def hide_marker(self, mtype):
-        _marker_queue.put(('hide', mtype))
+        self._queue_sync(('hide', mtype))
 
     def hide_all_markers(self):
-        for mt in ('card', 'score', 'submit'):
-            _marker_queue.put(('hide', mt))
+        for mt in MARKER_ORDER:
+            self._queue_sync(('hide', mt))
 
     def show_marker_at(self, mtype, x, y, w, h):
-        _marker_queue.put(('show', mtype, int(x), int(y), int(w), int(h)))
+        self._queue_sync(('show', mtype, int(x), int(y), int(w), int(h)))
 
     def scan_card_area(self, x, y, w, h, duration_ms=900):
         _marker_queue.put(('scan_card', int(x), int(y), int(w), int(h), int(duration_ms)))
@@ -796,6 +983,22 @@ def main():
 
     api._window = window
 
+    # UI 渲染之后再后台加载 OCR 模型：不与窗口创建 / WebView2 初始化抢 CPU 和磁盘
+    def _warmup_ocr_after_ui(*args):
+        if not activated:
+            return  # 停在激活页，没必要加载模型
+        try:
+            from local_ocr import warmup_async
+            warmup_async(delay=0.8)   # 让首屏先绘制完成再开始读模型
+        except Exception:
+            log.warning('安排本地 OCR 预热失败', exc_info=True)
+
+    try:
+        window.events.loaded += _warmup_ocr_after_ui
+    except Exception:
+        log.warning('window.events.loaded 不可用，改用定时预热', exc_info=True)
+        threading.Timer(3.0, _warmup_ocr_after_ui).start()
+
     def remove_taskbar_icon():
         for _ in range(10):
             try:
@@ -803,10 +1006,17 @@ def main():
                 if hwnd:
                     hide_from_taskbar(hwnd)
                     set_window_topmost(hwnd)
+                    fit_window_into_work_area(hwnd)
                     break
             except Exception:
                 pass
             time.sleep(0.05)
+        # WebView2 首帧后尺寸才最终确定，再校正一次，避免仍按初始尺寸超出屏幕
+        try:
+            time.sleep(0.8)
+            fit_window_into_work_area(int(window.native.Handle.ToInt64()))
+        except Exception:
+            pass
 
     threading.Thread(target=remove_taskbar_icon, daemon=True).start()
 
