@@ -1378,6 +1378,28 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // 【重置】：把“已改数量”归零、清空评分过程，让【批改】可以重新开始
+    var resetBtn = document.getElementById('reset-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', function() {
+            if (gradingActive || gradingBusy) return;   // 批改中不允许重置
+            gradingStopRequested = false;
+            var debugInput2 = document.querySelector('.debug-info input');
+            if (debugInput2) {
+                debugInput2.classList.remove('task-completed');
+                debugInput2.value = '提示信息';
+            }
+            var progressFill2 = document.querySelector('.progress-fill');
+            if (progressFill2) progressFill2.classList.remove('task-completed');
+            var progressText2 = document.querySelector('.progress-text');
+            if (progressText2) {
+                var totalInput2 = document.querySelector('.setting-group .setting-item:nth-child(1) input');
+                progressText2.textContent = '0 / ' + (parseInt(totalInput2 && totalInput2.value, 10) || 0);
+            }
+            resetGradingProgress();
+        });
+    }
+
     markingBtns.forEach(function(btn) {
         btn.addEventListener('click', function() {
             var mtype = this.classList.contains('card-area') ? 'card' : this.classList.contains('score-area') ? 'score' : 'submit';

@@ -1251,6 +1251,14 @@
             background-color: #93c9a0;
             cursor: not-allowed;
         }
+
+        .reset {
+            background-color: #607d8b;
+        }
+        .reset:disabled {
+            background-color: #a7b7bf;
+            cursor: not-allowed;
+        }
         
         .pause {
             background-color: #ff9800;
